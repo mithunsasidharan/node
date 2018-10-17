@@ -52,6 +52,11 @@ class SerializerContext : public BaseObject,
   static void WriteUint64(const FunctionCallbackInfo<Value>& args);
   static void WriteDouble(const FunctionCallbackInfo<Value>& args);
   static void WriteRawBytes(const FunctionCallbackInfo<Value>& args);
+
+  SET_NO_MEMORY_INFO()
+  SET_MEMORY_INFO_NAME(SerializerContext)
+  SET_SELF_SIZE(SerializerContext)
+
  private:
   ValueSerializer serializer_;
 };
@@ -76,6 +81,11 @@ class DeserializerContext : public BaseObject,
   static void ReadUint64(const FunctionCallbackInfo<Value>& args);
   static void ReadDouble(const FunctionCallbackInfo<Value>& args);
   static void ReadRawBytes(const FunctionCallbackInfo<Value>& args);
+
+  SET_NO_MEMORY_INFO()
+  SET_MEMORY_INFO_NAME(DeserializerContext)
+  SET_SELF_SIZE(DeserializerContext)
+
  private:
   const uint8_t* data_;
   const size_t length_;
@@ -86,7 +96,7 @@ class DeserializerContext : public BaseObject,
 SerializerContext::SerializerContext(Environment* env, Local<Object> wrap)
   : BaseObject(env, wrap),
     serializer_(env->isolate(), this) {
-  MakeWeak<SerializerContext>(this);
+  MakeWeak();
 }
 
 void SerializerContext::ThrowDataCloneError(Local<String> message) {
@@ -274,7 +284,7 @@ DeserializerContext::DeserializerContext(Environment* env,
     deserializer_(env->isolate(), data_, length_, this) {
   object()->Set(env->context(), env->buffer_string(), buffer).FromJust();
 
-  MakeWeak<DeserializerContext>(this);
+  MakeWeak();
 }
 
 MaybeLocal<Object> DeserializerContext::ReadHostObject(Isolate* isolate) {
@@ -487,4 +497,4 @@ void Initialize(Local<Object> target,
 }  // anonymous namespace
 }  // namespace node
 
-NODE_BUILTIN_MODULE_CONTEXT_AWARE(serdes, node::Initialize)
+NODE_MODULE_CONTEXT_AWARE_INTERNAL(serdes, node::Initialize)

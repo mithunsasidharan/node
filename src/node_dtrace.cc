@@ -69,13 +69,15 @@ using v8::Value;
   if ((*(const char **)valp = *_##member) == nullptr)                      \
     *(const char **)valp = "<unknown>";
 
-#define SLURP_INT(obj, member, valp)                                       \
-  if (!(obj)->IsObject()) {                                                \
-    return node::THROW_ERR_INVALID_ARG_TYPE(env,                           \
-        "expected object for " #obj " to contain integer member " #member);\
-  }                                                                        \
-  *valp = obj->Get(OneByteString(env->isolate(), #member))                 \
-      ->Int32Value();
+#define SLURP_INT(obj, member, valp)                                           \
+  if (!(obj)->IsObject()) {                                                    \
+    return node::THROW_ERR_INVALID_ARG_TYPE(                                   \
+        env,                                                                   \
+        "expected object for " #obj " to contain integer member " #member);    \
+  }                                                                            \
+  *valp = obj->Get(OneByteString(env->isolate(), #member))                     \
+              ->Int32Value(env->context())                                     \
+              .FromJust();
 
 #define SLURP_OBJECT(obj, member, valp)                                    \
   if (!(obj)->IsObject()) {                                                \
@@ -194,7 +196,7 @@ void DTRACE_HTTP_SERVER_RESPONSE(const FunctionCallbackInfo<Value>& args) {
 
 void DTRACE_HTTP_CLIENT_REQUEST(const FunctionCallbackInfo<Value>& args) {
   node_dtrace_http_client_request_t req;
-  char *header;
+  char* header;
 
   if (!NODE_HTTP_CLIENT_REQUEST_ENABLED())
     return;
@@ -259,7 +261,7 @@ void InitDTrace(Environment* env, Local<Object> target) {
   HandleScope scope(env->isolate());
 
   static struct {
-    const char *name;
+    const char* name;
     void (*func)(const FunctionCallbackInfo<Value>&);
   } tab[] = {
 #define NODE_PROBE(name) #name, name
@@ -274,7 +276,9 @@ void InitDTrace(Environment* env, Local<Object> target) {
 
   for (size_t i = 0; i < arraysize(tab); i++) {
     Local<String> key = OneByteString(env->isolate(), tab[i].name);
-    Local<Value> val = env->NewFunctionTemplate(tab[i].func)->GetFunction();
+    Local<Value> val = env->NewFunctionTemplate(tab[i].func)
+                           ->GetFunction(env->context())
+                           .ToLocalChecked();
     target->Set(key, val);
   }
 

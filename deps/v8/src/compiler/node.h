@@ -159,9 +159,6 @@ class V8_EXPORT_PRIVATE Node final {
   // Returns true if {owner1} and {owner2} are the only users of {this} node.
   bool OwnedBy(Node const* owner1, Node const* owner2) const;
 
-  // Returns true if addressing related operands (such as load, store, lea)
-  // are the only users of {this} node.
-  bool OwnedByAddressingOperand() const;
   void Print() const;
 
  private:
@@ -264,8 +261,8 @@ class V8_EXPORT_PRIVATE Node final {
   void set_op(const Operator* op) { op_ = op; }
 
   // Only NodeProperties should manipulate the type.
-  Type* type() const { return type_; }
-  void set_type(Type* type) { type_ = type; }
+  Type type() const { return type_; }
+  void set_type(Type type) { type_ = type; }
 
   // Only NodeMarkers should manipulate the marks on nodes.
   Mark mark() const { return mark_; }
@@ -285,7 +282,7 @@ class V8_EXPORT_PRIVATE Node final {
   static const int kMaxInlineCapacity = InlineCapacityField::kMax - 1;
 
   const Operator* op_;
-  Type* type_;
+  Type type_;
   Mark mark_;
   uint32_t bit_field_;
   Use* first_use_;
@@ -312,12 +309,6 @@ typedef ZoneSet<Node*> NodeSet;
 typedef ZoneVector<Node*> NodeVector;
 typedef ZoneVector<NodeVector> NodeVectorVector;
 
-
-// Helper to extract parameters from Operator1<*> nodes.
-template <typename T>
-static inline const T& OpParameter(const Node* node) {
-  return OpParameter<T>(node->op());
-}
 
 class Node::InputEdges final {
  public:

@@ -233,10 +233,6 @@ class MetaBuildWrapper(object):
 
     self.args = parser.parse_args(argv)
 
-    # TODO(machenbach): This prepares passing swarming targets to isolate on the
-    # infra side.
-    self.args.swarming_targets_file = None
-
   def DumpInputFiles(self):
 
     def DumpContentsOfFilePassedTo(arg_name, path):
@@ -393,7 +389,7 @@ class MetaBuildWrapper(object):
     elif self.platform.startswith('linux'):
       os_dim = ('os', 'Ubuntu-14.04')
     elif self.platform == 'win32':
-      os_dim = ('os', 'Windows-10-14393')
+      os_dim = ('os', 'Windows-10')
     else:
       raise MBErr('unrecognized platform string "%s"' % self.platform)
 
@@ -839,7 +835,13 @@ class MetaBuildWrapper(object):
     else:
       subdir, exe = 'win', 'gn.exe'
 
-    gn_path = self.PathJoin(self.chromium_src_dir, 'buildtools', subdir, exe)
+    arch = platform.machine()
+    if (arch.startswith('s390') or arch.startswith('ppc') or
+        self.platform.startswith('aix')):
+      # use gn in PATH
+      gn_path = 'gn'
+    else:
+      gn_path = self.PathJoin(self.chromium_src_dir, 'buildtools', subdir, exe)
     return [gn_path, subcommand, path] + list(args)
 
 

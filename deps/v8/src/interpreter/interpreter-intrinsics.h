@@ -14,10 +14,6 @@ namespace interpreter {
 // List of supported intrisics, with upper case name, lower case name and
 // expected number of arguments (-1 denoting argument count is variable).
 #define INTRINSICS_LIST(V)                                            \
-  V(AsyncFunctionAwaitCaught, async_function_await_caught, 3)         \
-  V(AsyncFunctionAwaitUncaught, async_function_await_uncaught, 3)     \
-  V(AsyncGeneratorAwaitCaught, async_generator_await_caught, 2)       \
-  V(AsyncGeneratorAwaitUncaught, async_generator_await_uncaught, 2)   \
   V(AsyncGeneratorReject, async_generator_reject, 2)                  \
   V(AsyncGeneratorResolve, async_generator_resolve, 3)                \
   V(AsyncGeneratorYield, async_generator_yield, 3)                    \
@@ -30,13 +26,10 @@ namespace interpreter {
   V(CreateIterResultObject, create_iter_result_object, 2)             \
   V(CreateAsyncFromSyncIterator, create_async_from_sync_iterator, 1)  \
   V(HasProperty, has_property, 2)                                     \
+  V(GetProperty, get_property, 2)                                     \
   V(IsArray, is_array, 1)                                             \
-  V(IsJSMap, is_js_map, 1)                                            \
   V(IsJSProxy, is_js_proxy, 1)                                        \
   V(IsJSReceiver, is_js_receiver, 1)                                  \
-  V(IsJSSet, is_js_set, 1)                                            \
-  V(IsJSWeakMap, is_js_weak_map, 1)                                   \
-  V(IsJSWeakSet, is_js_weak_set, 1)                                   \
   V(IsSmi, is_smi, 1)                                                 \
   V(IsTypedArray, is_typed_array, 1)                                  \
   V(RejectPromise, reject_promise, 3)                                 \

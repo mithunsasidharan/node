@@ -43,7 +43,6 @@ template <typename T, size_t N>
 char (&ArraySizeHelper(const T (&array)[N]))[N];
 #endif
 
-
 // bit_cast<Dest,Source> is a template function that implements the
 // equivalent of "*reinterpret_cast<Dest*>(&source)".  We need this in
 // very low-level functions like the protobuf library and fast math
@@ -114,6 +113,12 @@ V8_INLINE Dest bit_cast(Source const& source) {
   TypeName(const TypeName&) = delete;      \
   DISALLOW_ASSIGN(TypeName)
 
+// Explicitly declare all copy/move constructors and assignments as deleted.
+#define DISALLOW_COPY_AND_MOVE_AND_ASSIGN(TypeName) \
+  TypeName(TypeName&&) = delete;                    \
+  TypeName& operator=(TypeName&&) = delete;         \
+  DISALLOW_COPY_AND_ASSIGN(TypeName)
+
 // Explicitly declare all implicit constructors as deleted, namely the
 // default constructor, copy constructor and operator= functions.
 // This is especially useful for classes containing only static methods.
@@ -129,9 +134,9 @@ V8_INLINE Dest bit_cast(Source const& source) {
 
 // Disallow copying a type, and only provide move construction and move
 // assignment. Especially useful for move-only structs.
-#define MOVE_ONLY_NO_DEFAULT_CONSTRUCTOR(TypeName) \
-  TypeName(TypeName&&) = default;                  \
-  TypeName& operator=(TypeName&&) = default;       \
+#define MOVE_ONLY_NO_DEFAULT_CONSTRUCTOR(TypeName)       \
+  TypeName(TypeName&&) V8_NOEXCEPT = default;            \
+  TypeName& operator=(TypeName&&) V8_NOEXCEPT = default; \
   DISALLOW_COPY_AND_ASSIGN(TypeName)
 
 // A macro to disallow the dynamic allocation.
@@ -146,27 +151,25 @@ V8_INLINE Dest bit_cast(Source const& source) {
   void operator delete(void*, size_t) { base::OS::Abort(); } \
   void operator delete[](void*, size_t) { base::OS::Abort(); }
 
-// Newly written code should use V8_INLINE and V8_NOINLINE directly.
-#define INLINE(declarator)    V8_INLINE declarator
-#define NO_INLINE(declarator) V8_NOINLINE declarator
-
-
-// Newly written code should use WARN_UNUSED_RESULT.
-#define MUST_USE_RESULT WARN_UNUSED_RESULT
-
-
-// Define V8_USE_ADDRESS_SANITIZER macros.
+// Define V8_USE_ADDRESS_SANITIZER macro.
 #if defined(__has_feature)
 #if __has_feature(address_sanitizer)
 #define V8_USE_ADDRESS_SANITIZER 1
 #endif
 #endif
 
-// Define DISABLE_ASAN macros.
+// Define DISABLE_ASAN macro.
 #ifdef V8_USE_ADDRESS_SANITIZER
 #define DISABLE_ASAN __attribute__((no_sanitize_address))
 #else
 #define DISABLE_ASAN
+#endif
+
+// Define V8_USE_MEMORY_SANITIZER macro.
+#if defined(__has_feature)
+#if __has_feature(memory_sanitizer)
+#define V8_USE_MEMORY_SANITIZER 1
+#endif
 #endif
 
 // Helper macro to define no_sanitize attributes only with clang.
@@ -196,12 +199,68 @@ V8_INLINE Dest bit_cast(Source const& source) {
 // TODO(all) Replace all uses of this macro with static_assert, remove macro.
 #define STATIC_ASSERT(test) static_assert(test, #test)
 
-// TODO(rongjie) Remove this workaround once we require gcc >= 5.0
-#if __GNUG__ && __GNUC__ < 5
-#define IS_TRIVIALLY_COPYABLE(T) \
-  (__has_trivial_copy(T) && __has_trivial_destructor(T))
+namespace v8 {
+namespace base {
+
+// Note that some implementations of std::is_trivially_copyable mandate that at
+// least one of the copy constructor, move constructor, copy assignment or move
+// assignment is non-deleted, while others do not. Be aware that also
+// base::is_trivially_copyable will differ for these cases.
+template <typename T>
+struct is_trivially_copyable {
+#if V8_CC_MSVC
+  // Unfortunately, MSVC 2015 is broken in that std::is_trivially_copyable can
+  // be false even though it should be true according to the standard.
+  // (status at 2018-02-26, observed on the msvc waterfall bot).
+  // Interestingly, the lower-level primitives used below are working as
+  // intended, so we reimplement this according to the standard.
+  // See also https://developercommunity.visualstudio.com/content/problem/
+  //          170883/msvc-type-traits-stdis-trivial-is-bugged.html.
+  static constexpr bool value =
+      // Copy constructor is trivial or deleted.
+      (std::is_trivially_copy_constructible<T>::value ||
+       !std::is_copy_constructible<T>::value) &&
+      // Copy assignment operator is trivial or deleted.
+      (std::is_trivially_copy_assignable<T>::value ||
+       !std::is_copy_assignable<T>::value) &&
+      // Move constructor is trivial or deleted.
+      (std::is_trivially_move_constructible<T>::value ||
+       !std::is_move_constructible<T>::value) &&
+      // Move assignment operator is trivial or deleted.
+      (std::is_trivially_move_assignable<T>::value ||
+       !std::is_move_assignable<T>::value) &&
+      // (Some implementations mandate that one of the above is non-deleted, but
+      // the standard does not, so let's skip this check.)
+      // Trivial non-deleted destructor.
+      std::is_trivially_destructible<T>::value;
+
+#elif defined(__GNUC__) && __GNUC__ < 5
+  // WARNING:
+  // On older libstdc++ versions, there is no way to correctly implement
+  // is_trivially_copyable. The workaround below is an approximation (neither
+  // over- nor underapproximation). E.g. it wrongly returns true if the move
+  // constructor is non-trivial, and it wrongly returns false if the copy
+  // constructor is deleted, but copy assignment is trivial.
+  // TODO(rongjie) Remove this workaround once we require gcc >= 5.0
+  static constexpr bool value =
+      __has_trivial_copy(T) && __has_trivial_destructor(T);
+
 #else
-#define IS_TRIVIALLY_COPYABLE(T) std::is_trivially_copyable<T>::value
+  static constexpr bool value = std::is_trivially_copyable<T>::value;
+#endif
+};
+#if defined(__GNUC__) && __GNUC__ < 5
+// On older libstdc++ versions, base::is_trivially_copyable<T>::value is only an
+// approximation (see above), so make ASSERT_{NOT_,}TRIVIALLY_COPYABLE a noop.
+#define ASSERT_TRIVIALLY_COPYABLE(T) static_assert(true, "check disabled")
+#define ASSERT_NOT_TRIVIALLY_COPYABLE(T) static_assert(true, "check disabled")
+#else
+#define ASSERT_TRIVIALLY_COPYABLE(T)                         \
+  static_assert(::v8::base::is_trivially_copyable<T>::value, \
+                #T " should be trivially copyable")
+#define ASSERT_NOT_TRIVIALLY_COPYABLE(T)                      \
+  static_assert(!::v8::base::is_trivially_copyable<T>::value, \
+                #T " should not be trivially copyable")
 #endif
 
 // The USE(x, ...) template is used to silence C++ compiler warnings
@@ -211,11 +270,22 @@ struct Use {
   template <typename T>
   Use(T&&) {}  // NOLINT(runtime/explicit)
 };
-#define USE(...)                                         \
-  do {                                                   \
-    ::Use unused_tmp_array_for_use_macro[]{__VA_ARGS__}; \
-    (void)unused_tmp_array_for_use_macro;                \
+#define USE(...)                                                   \
+  do {                                                             \
+    ::v8::base::Use unused_tmp_array_for_use_macro[]{__VA_ARGS__}; \
+    (void)unused_tmp_array_for_use_macro;                          \
   } while (false)
+
+}  // namespace base
+}  // namespace v8
+
+// implicit_cast<A>(x) triggers an implicit cast from {x} to type {A}. This is
+// useful in situations where static_cast<A>(x) would do too much.
+// Only use this for cheap-to-copy types, or use move semantics explicitly.
+template <class A>
+V8_INLINE A implicit_cast(A x) {
+  return x;
+}
 
 // Define our own macros for writing 64-bit constants.  This is less fragile
 // than defining __STDC_CONSTANT_MACROS before including <stdint.h>, and it
@@ -241,6 +311,14 @@ struct Use {
 #define V8PRIxPTR V8_PTR_PREFIX "x"
 #define V8PRIdPTR V8_PTR_PREFIX "d"
 #define V8PRIuPTR V8_PTR_PREFIX "u"
+
+#ifdef V8_TARGET_ARCH_64_BIT
+#define V8_PTR_HEX_DIGITS 12
+#define V8PRIxPTR_FMT "0x%012" V8PRIxPTR
+#else
+#define V8_PTR_HEX_DIGITS 8
+#define V8PRIxPTR_FMT "0x%08" V8PRIxPTR
+#endif
 
 // ptrdiff_t is 't' according to the standard, but MSVC uses 'I'.
 #if V8_CC_MSVC
@@ -337,5 +415,31 @@ bool is_inbounds(float_t v) {
   return (kLowerBoundIsMin ? (kLowerBound <= v) : (kLowerBound < v)) &&
          (kUpperBoundIsMax ? (v <= kUpperBound) : (v < kUpperBound));
 }
+
+#ifdef V8_OS_WIN
+
+// Setup for Windows shared library export.
+#ifdef BUILDING_V8_SHARED
+#define V8_EXPORT_PRIVATE __declspec(dllexport)
+#elif USING_V8_SHARED
+#define V8_EXPORT_PRIVATE __declspec(dllimport)
+#else
+#define V8_EXPORT_PRIVATE
+#endif  // BUILDING_V8_SHARED
+
+#else  // V8_OS_WIN
+
+// Setup for Linux shared library export.
+#if V8_HAS_ATTRIBUTE_VISIBILITY
+#ifdef BUILDING_V8_SHARED
+#define V8_EXPORT_PRIVATE __attribute__((visibility("default")))
+#else
+#define V8_EXPORT_PRIVATE
+#endif
+#else
+#define V8_EXPORT_PRIVATE
+#endif
+
+#endif  // V8_OS_WIN
 
 #endif  // V8_BASE_MACROS_H_

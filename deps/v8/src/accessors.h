@@ -33,20 +33,16 @@ class JavaScriptFrame;
   V(function_name, FunctionName)                                    \
   V(function_length, FunctionLength)                                \
   V(function_prototype, FunctionPrototype)                          \
-  V(script_column_offset, ScriptColumnOffset)                       \
-  V(script_compilation_type, ScriptCompilationType)                 \
-  V(script_context_data, ScriptContextData)                         \
-  V(script_eval_from_script, ScriptEvalFromScript)                  \
-  V(script_eval_from_script_position, ScriptEvalFromScriptPosition) \
-  V(script_eval_from_function_name, ScriptEvalFromFunctionName)     \
-  V(script_id, ScriptId)                                            \
-  V(script_line_offset, ScriptLineOffset)                           \
-  V(script_name, ScriptName)                                        \
-  V(script_source, ScriptSource)                                    \
-  V(script_type, ScriptType)                                        \
-  V(script_source_url, ScriptSourceUrl)                             \
-  V(script_source_mapping_url, ScriptSourceMappingUrl)              \
   V(string_length, StringLength)
+
+#define SIDE_EFFECT_FREE_ACCESSOR_INFO_LIST(V) \
+  V(ArrayLength)                               \
+  V(BoundFunctionLength)                       \
+  V(BoundFunctionName)                         \
+  V(FunctionName)                              \
+  V(FunctionLength)                            \
+  V(FunctionPrototype)                         \
+  V(StringLength)
 
 #define ACCESSOR_SETTER_LIST(V) \
   V(ArrayLengthSetter)          \
@@ -73,6 +69,16 @@ class Accessors : public AllStatic {
   ACCESSOR_SETTER_LIST(ACCESSOR_SETTER_DECLARATION)
 #undef ACCESSOR_SETTER_DECLARATION
 
+  static constexpr int kAccessorInfoCount =
+#define COUNT_ACCESSOR(...) +1
+      ACCESSOR_INFO_LIST(COUNT_ACCESSOR);
+#undef COUNT_ACCESSOR
+
+  static constexpr int kAccessorSetterCount =
+#define COUNT_ACCESSOR(...) +1
+      ACCESSOR_SETTER_LIST(COUNT_ACCESSOR);
+#undef COUNT_ACCESSOR
+
   static void ModuleNamespaceEntryGetter(
       v8::Local<v8::Name> name,
       const v8::PropertyCallbackInfo<v8::Value>& info);
@@ -87,8 +93,13 @@ class Accessors : public AllStatic {
 
   // Returns true for properties that are accessors to object fields.
   // If true, the matching FieldIndex is returned through |field_index|.
-  static bool IsJSObjectFieldAccessor(Handle<Map> map, Handle<Name> name,
+  static bool IsJSObjectFieldAccessor(Isolate* isolate, Handle<Map> map,
+                                      Handle<Name> name,
                                       FieldIndex* field_index);
+
+  static MaybeHandle<Object> ReplaceAccessorWithDataProperty(
+      Handle<Object> receiver, Handle<JSObject> holder, Handle<Name> name,
+      Handle<Object> value);
 
   // Create an AccessorInfo. The setter is optional (can be nullptr).
   //

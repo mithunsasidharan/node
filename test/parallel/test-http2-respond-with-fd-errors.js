@@ -10,11 +10,12 @@ const fixtures = require('../common/fixtures');
 
 const http2 = require('http2');
 
+const { internalBinding } = require('internal/test/binding');
 const {
   constants,
   Http2Stream,
   nghttp2ErrorString
-} = process.binding('http2');
+} = internalBinding('http2');
 const { NghttpError } = require('internal/http2/util');
 
 // tests error handling within processRespondWithFD
@@ -95,7 +96,7 @@ function runTest(test) {
   req.resume();
   req.end();
 
-  req.on('close', common.mustCall(() => {
+  req.on('end', common.mustCall(() => {
     client.close();
 
     if (!tests.length) {

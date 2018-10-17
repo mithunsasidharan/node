@@ -3,8 +3,10 @@
 
 const common = require('../common');
 
-if (!common.hasTracing)
+if (!process.binding('config').hasTracing)
   common.skip('missing trace events');
+if (!common.isMainThread)
+  common.skip('process.chdir is not available in Workers');
 
 const assert = require('assert');
 const cp = require('child_process');
@@ -128,9 +130,10 @@ if (isChild) {
   proc.once('exit', common.mustCall(() => {
     const file = path.join(tmpdir.path, 'node_trace.1.log');
 
-    assert(common.fileExists(file));
+    assert(fs.existsSync(file));
     fs.readFile(file, common.mustCall((err, data) => {
-      const traces = JSON.parse(data.toString()).traceEvents;
+      const traces = JSON.parse(data.toString()).traceEvents
+        .filter((trace) => trace.cat !== '__metadata');
       assert.strictEqual(traces.length,
                          expectedMarks.length +
                          expectedBegins.length +

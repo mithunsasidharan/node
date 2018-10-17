@@ -73,6 +73,20 @@ void BuiltinDeserializer::DeserializeEagerBuiltinsAndHandlers() {
   }
 #endif
 
+#ifdef ENABLE_DISASSEMBLER
+  if (FLAG_print_builtin_code) {
+    // We can't print builtins during deserialization because they may refer
+    // to not yet deserialized builtins.
+    for (int i = 0; i < BSU::kNumberOfBuiltins; i++) {
+      if (!IsLazyDeserializationEnabled() || !Builtins::IsLazy(i)) {
+        Code* code = builtins->builtin(i);
+        const char* name = Builtins::name(i);
+        code->PrintBuiltinCode(isolate(), name);
+      }
+    }
+  }
+#endif
+
   // Deserialize bytecode handlers.
 
   Interpreter* interpreter = isolate()->interpreter();
@@ -113,10 +127,8 @@ Code* BuiltinDeserializer::DeserializeBuiltin(int builtin_id) {
 
 #ifdef ENABLE_DISASSEMBLER
   if (FLAG_print_builtin_code) {
-    DCHECK(isolate()->builtins()->is_initialized());
-    OFStream os(stdout);
-    code->Disassemble(Builtins::name(builtin_id), os);
-    os << std::flush;
+    const char* name = Builtins::name(builtin_id);
+    code->PrintBuiltinCode(isolate(), name);
   }
 #endif  // ENABLE_DISASSEMBLER
 
@@ -127,17 +139,7 @@ Code* BuiltinDeserializer::DeserializeHandler(Bytecode bytecode,
                                               OperandScale operand_scale) {
   allocator()->ReserveForHandler(bytecode, operand_scale);
   DisallowHeapAllocation no_gc;
-  Code* code = DeserializeHandlerRaw(bytecode, operand_scale);
-
-#ifdef ENABLE_DISASSEMBLER
-  if (FLAG_print_builtin_code) {
-    OFStream os(stdout);
-    code->Disassemble(Bytecodes::ToString(bytecode), os);
-    os << std::flush;
-  }
-#endif  // ENABLE_DISASSEMBLER
-
-  return code;
+  return DeserializeHandlerRaw(bytecode, operand_scale);
 }
 
 Code* BuiltinDeserializer::DeserializeBuiltinRaw(int builtin_id) {
@@ -157,8 +159,16 @@ Code* BuiltinDeserializer::DeserializeBuiltinRaw(int builtin_id) {
 
   // Flush the instruction cache.
   Code* code = Code::cast(o);
-  Assembler::FlushICache(code->instruction_start(), code->instruction_size());
+  Assembler::FlushICache(code->raw_instruction_start(),
+                         code->raw_instruction_size());
 
+  PROFILE(isolate(), CodeCreateEvent(CodeEventListener::BUILTIN_TAG,
+                                     AbstractCode::cast(code),
+                                     Builtins::name(builtin_id)));
+  LOG_CODE_EVENT(isolate(),
+                 CodeLinePosInfoRecordEvent(
+                     code->raw_instruction_start(),
+                     ByteArray::cast(code->source_position_table())));
   return code;
 }
 
@@ -181,7 +191,17 @@ Code* BuiltinDeserializer::DeserializeHandlerRaw(Bytecode bytecode,
 
   // Flush the instruction cache.
   Code* code = Code::cast(o);
-  Assembler::FlushICache(code->instruction_start(), code->instruction_size());
+  Assembler::FlushICache(code->raw_instruction_start(),
+                         code->raw_instruction_size());
+
+  std::string name = Bytecodes::ToString(bytecode, operand_scale);
+  PROFILE(isolate(), CodeCreateEvent(CodeEventListener::HANDLER_TAG,
+                                     AbstractCode::cast(code), name.c_str()));
+#ifdef ENABLE_DISASSEMBLER
+  if (FLAG_print_builtin_code) {
+    code->PrintBuiltinCode(isolate(), name.c_str());
+  }
+#endif  // ENABLE_DISASSEMBLER
 
   return code;
 }

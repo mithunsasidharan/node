@@ -4,7 +4,7 @@
 
 #include "src/objects/template-objects.h"
 
-#include "src/factory.h"
+#include "src/heap/factory.h"
 #include "src/isolate.h"
 #include "src/objects-inl.h"
 #include "src/property-descriptor.h"
@@ -14,9 +14,7 @@ namespace internal {
 
 // static
 Handle<JSArray> TemplateObjectDescription::CreateTemplateObject(
-    Handle<TemplateObjectDescription> description) {
-  Isolate* const isolate = description->GetIsolate();
-
+    Isolate* isolate, Handle<TemplateObjectDescription> description) {
   // Create the raw object from the {raw_strings}.
   Handle<FixedArray> raw_strings(description->raw_strings(), isolate);
   Handle<JSArray> raw_object = isolate->factory()->NewJSArrayWithElements(

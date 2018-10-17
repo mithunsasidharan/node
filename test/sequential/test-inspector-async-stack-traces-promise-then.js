@@ -3,7 +3,6 @@
 const common = require('../common');
 common.skipIfInspectorDisabled();
 common.skipIf32Bits();
-common.crashOnUnhandledRejection();
 const { NodeInstance } = require('../common/inspector-helper');
 const assert = require('assert');
 
@@ -32,7 +31,7 @@ async function runTests() {
     { 'method': 'Runtime.runIfWaitingForDebugger' }
   ]);
 
-  await session.waitForBreakOnLine(0, '[eval]');
+  await session.waitForBreakOnLine(2, '[eval]');
   await session.send({ 'method': 'Debugger.resume' });
 
   console.error('[test] Waiting for break1');
@@ -46,7 +45,7 @@ async function runTests() {
                    'break2', 'runTest:8');
 
   await session.runToCompletion();
-  assert.strictEqual(0, (await instance.expectShutdown()).exitCode);
+  assert.strictEqual((await instance.expectShutdown()).exitCode, 0);
 }
 
 function debuggerPausedAt(msg, functionName, previousTickLocation) {

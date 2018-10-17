@@ -25,12 +25,17 @@ const common = require('../common');
 if (!common.hasCrypto)
   common.skip('missing crypto');
 
+common.expectWarning({
+  DeprecationWarning: [
+    ['crypto.createCipher is deprecated.', 'DEP0106'],
+    ['crypto._toBuf is deprecated.', 'DEP0114']
+  ]
+});
+
 const assert = require('assert');
 const crypto = require('crypto');
 const tls = require('tls');
 const fixtures = require('../common/fixtures');
-
-crypto.DEFAULT_ENCODING = 'buffer';
 
 // Test Certificates
 const caPem = fixtures.readSync('test_ca.pem', 'ascii');
@@ -131,7 +136,7 @@ assert(tlsCiphers.every((value) => noCapitals.test(value)));
 validateList(tlsCiphers);
 
 // Assert that we have sha1 and sha256 but not SHA1 and SHA256.
-assert.notStrictEqual(0, crypto.getHashes().length);
+assert.notStrictEqual(crypto.getHashes().length, 0);
 assert(crypto.getHashes().includes('sha1'));
 assert(crypto.getHashes().includes('sha256'));
 assert(!crypto.getHashes().includes('SHA1'));
@@ -141,7 +146,7 @@ assert(!crypto.getHashes().includes('rsa-sha1'));
 validateList(crypto.getHashes());
 
 // Assume that we have at least secp384r1.
-assert.notStrictEqual(0, crypto.getCurves().length);
+assert.notStrictEqual(crypto.getCurves().length, 0);
 assert(crypto.getCurves().includes('secp384r1'));
 assert(!crypto.getCurves().includes('SECP384R1'));
 validateList(crypto.getCurves());
@@ -296,3 +301,8 @@ testEncoding({
 testEncoding({
   defaultEncoding: 'latin1'
 }, assertionHashLatin1);
+
+{
+  // Test that the exported _toBuf function is deprecated.
+  crypto._toBuf(Buffer.alloc(0));
+}

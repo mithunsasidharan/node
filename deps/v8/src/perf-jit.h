@@ -38,10 +38,10 @@ namespace internal {
 // Linux perf tool logging support
 class PerfJitLogger : public CodeEventLogger {
  public:
-  PerfJitLogger();
+  explicit PerfJitLogger(Isolate* isolate);
   virtual ~PerfJitLogger();
 
-  void CodeMoveEvent(AbstractCode* from, Address to) override;
+  void CodeMoveEvent(AbstractCode* from, AbstractCode* to) override;
   void CodeDisableOptEvent(AbstractCode* code,
                            SharedFunctionInfo* shared) override {}
 
@@ -54,9 +54,7 @@ class PerfJitLogger : public CodeEventLogger {
   uint64_t GetTimestamp();
   void LogRecordedBuffer(AbstractCode* code, SharedFunctionInfo* shared,
                          const char* name, int length) override;
-  void LogRecordedBuffer(const InstructionStream* stream, const char* name,
-                         int length) override;
-  void LogRecordedBuffer(wasm::WasmCode* code, const char* name,
+  void LogRecordedBuffer(const wasm::WasmCode* code, const char* name,
                          int length) override;
 
   // Extension added to V8 log file name to get the low-level log name.
@@ -120,7 +118,9 @@ class PerfJitLogger : public CodeEventLogger {
 // PerfJitLogger is only implemented on Linux
 class PerfJitLogger : public CodeEventLogger {
  public:
-  void CodeMoveEvent(AbstractCode* from, Address to) override {
+  explicit PerfJitLogger(Isolate* isolate) : CodeEventLogger(isolate) {}
+
+  void CodeMoveEvent(AbstractCode* from, AbstractCode* to) override {
     UNIMPLEMENTED();
   }
 
@@ -134,12 +134,7 @@ class PerfJitLogger : public CodeEventLogger {
     UNIMPLEMENTED();
   }
 
-  void LogRecordedBuffer(const InstructionStream* stream, const char* name,
-                         int length) override {
-    UNIMPLEMENTED();
-  }
-
-  void LogRecordedBuffer(wasm::WasmCode* code, const char* name,
+  void LogRecordedBuffer(const wasm::WasmCode* code, const char* name,
                          int length) override {
     UNIMPLEMENTED();
   }

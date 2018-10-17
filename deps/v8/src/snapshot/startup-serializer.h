@@ -14,23 +14,20 @@ namespace internal {
 
 class StartupSerializer : public Serializer<> {
  public:
-  StartupSerializer(
-      Isolate* isolate,
-      v8::SnapshotCreator::FunctionCodeHandling function_code_handling);
+  explicit StartupSerializer(Isolate* isolate);
   ~StartupSerializer() override;
 
   // Serialize the current state of the heap.  The order is:
-  // 1) Immortal immovable roots
-  // 2) Remaining strong references.
-  // 3) Partial snapshot cache.
-  // 4) Weak references (e.g. the string table).
+  // 1) Strong roots
+  // 2) Builtins and bytecode handlers
+  // 3) Partial snapshot cache
+  // 4) Weak references (e.g. the string table)
   void SerializeStrongReferences();
   void SerializeWeakReferencesAndDeferred();
 
   int PartialSnapshotCacheIndex(HeapObject* o);
 
   bool can_be_rehashed() const { return can_be_rehashed_; }
-  bool clear_function_code() const { return clear_function_code_; }
   bool root_has_been_serialized(int root_index) const {
     return root_has_been_serialized_.test(root_index);
   }
@@ -72,7 +69,6 @@ class StartupSerializer : public Serializer<> {
 
   void CheckRehashability(HeapObject* obj);
 
-  const bool clear_function_code_;
   std::bitset<Heap::kStrongRootListLength> root_has_been_serialized_;
   PartialCacheIndexMap partial_cache_index_map_;
   std::vector<AccessorInfo*> accessor_infos_;

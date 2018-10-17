@@ -2,18 +2,17 @@
 
 const common = require('../common');
 
-// The following tests validate base functionality for the fs/promises
+// The following tests validate base functionality for the fs.promises
 // FileHandle.chmod method.
 
 const fs = require('fs');
-const { open } = require('fs/promises');
+const { open } = fs.promises;
 const path = require('path');
 const tmpdir = require('../common/tmpdir');
 const assert = require('assert');
 const tmpDir = tmpdir.path;
 
 tmpdir.refresh();
-common.crashOnUnhandledRejection();
 
 async function validateFilePermission() {
   const filePath = path.resolve(tmpDir, 'tmp-chmod.txt');

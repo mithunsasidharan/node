@@ -35,7 +35,9 @@
 #include <string.h>
 
 #include <functional>  // std::function
-#include <type_traits>  // std::remove_reference
+#include <set>
+#include <string>
+#include <unordered_map>
 
 namespace node {
 
@@ -67,33 +69,23 @@ inline char* Calloc(size_t n);
 inline char* UncheckedMalloc(size_t n);
 inline char* UncheckedCalloc(size_t n);
 
+template <typename T>
+inline T MultiplyWithOverflowCheck(T a, T b);
+
 // Used by the allocation functions when allocation fails.
 // Thin wrapper around v8::Isolate::LowMemoryNotification() that checks
 // whether V8 is initialized.
 void LowMemoryNotification();
 
-#ifdef __GNUC__
-#define NO_RETURN __attribute__((noreturn))
-#else
-#define NO_RETURN
-#endif
-
 // The slightly odd function signature for Assert() is to ease
 // instruction cache pressure in calls from CHECK.
-NO_RETURN void Abort();
-NO_RETURN void Assert(const char* const (*args)[4]);
+[[noreturn]] void Abort();
+[[noreturn]] void Assert(const char* const (*args)[4]);
 void DumpBacktrace(FILE* fp);
 
-template <typename T> using remove_reference = std::remove_reference<T>;
-
-#define FIXED_ONE_BYTE_STRING(isolate, string)                                \
-  (node::OneByteString((isolate), (string), sizeof(string) - 1))
-
 #define DISALLOW_COPY_AND_ASSIGN(TypeName)                                    \
-  void operator=(const TypeName&) = delete;                                   \
-  void operator=(TypeName&&) = delete;                                        \
   TypeName(const TypeName&) = delete;                                         \
-  TypeName(TypeName&&) = delete
+  TypeName& operator=(const TypeName&) = delete
 
 // Windows 8+ does not like abort() in Release mode
 #ifdef _WIN32
@@ -132,16 +124,11 @@ template <typename T> using remove_reference = std::remove_reference<T>;
 #define CHECK_LE(a, b) CHECK((a) <= (b))
 #define CHECK_LT(a, b) CHECK((a) < (b))
 #define CHECK_NE(a, b) CHECK((a) != (b))
+#define CHECK_NULL(val) CHECK((val) == nullptr)
+#define CHECK_NOT_NULL(val) CHECK((val) != nullptr)
+#define CHECK_IMPLIES(a, b) CHECK(!(a) || (b))
 
 #define UNREACHABLE() ABORT()
-
-#define ASSIGN_OR_RETURN_UNWRAP(ptr, obj, ...)                                \
-  do {                                                                        \
-    *ptr =                                                                    \
-        Unwrap<typename node::remove_reference<decltype(**ptr)>::type>(obj);  \
-    if (*ptr == nullptr)                                                      \
-      return __VA_ARGS__;                                                     \
-  } while (0)
 
 // TAILQ-style intrusive list node.
 template <typename T>
@@ -222,7 +209,7 @@ inline v8::Local<TypeName> PersistentToLocal(
     v8::Isolate* isolate,
     const Persistent<TypeName>& persistent);
 
-// Unchecked conversion from a non-weak Persistent<T> to Local<TLocal<T>,
+// Unchecked conversion from a non-weak Persistent<T> to Local<T>,
 // use with care!
 //
 // Do not call persistent.Reset() while the returned Local<T> is still in
@@ -250,12 +237,14 @@ inline v8::Local<v8::String> OneByteString(v8::Isolate* isolate,
                                            const unsigned char* data,
                                            int length = -1);
 
-inline void Wrap(v8::Local<v8::Object> object, void* pointer);
+// Used to be a macro, hence the uppercase name.
+template <int N>
+inline v8::Local<v8::String> FIXED_ONE_BYTE_STRING(
+    v8::Isolate* isolate,
+    const char(&data)[N]) {
+  return OneByteString(isolate, data, N - 1);
+}
 
-inline void ClearWrap(v8::Local<v8::Object> object);
-
-template <typename TypeName>
-inline TypeName* Unwrap(v8::Local<v8::Object> object);
 
 // Swaps bytes in place. nbytes is the number of bytes to swap and must be a
 // multiple of the word size (checked by function).
@@ -265,6 +254,7 @@ inline void SwapBytes64(char* data, size_t nbytes);
 
 // tolower() is locale-sensitive.  Use ToLower() instead.
 inline char ToLower(char c);
+inline std::string ToLower(const std::string& in);
 
 // strcasecmp() is locale-sensitive.  Use StringEqualNoCase() instead.
 inline bool StringEqualNoCase(const char* a, const char* b);
@@ -428,7 +418,6 @@ class BufferValue : public MaybeStackBuffer<char> {
 // Use this when a variable or parameter is unused in order to explicitly
 // silence a compiler warning about that.
 template <typename T> inline void USE(T&&) {}
-}  // namespace node
 
 // Run a function when exiting the current scope.
 struct OnScopeLeave {
@@ -437,6 +426,68 @@ struct OnScopeLeave {
   explicit OnScopeLeave(std::function<void()> fn) : fn_(fn) {}
   ~OnScopeLeave() { fn_(); }
 };
+
+// Simple RAII wrapper for contiguous data that uses malloc()/free().
+template <typename T>
+struct MallocedBuffer {
+  T* data;
+  size_t size;
+
+  T* release() {
+    T* ret = data;
+    data = nullptr;
+    return ret;
+  }
+
+  inline bool is_empty() const { return data == nullptr; }
+
+  MallocedBuffer() : data(nullptr) {}
+  explicit MallocedBuffer(size_t size) : data(Malloc<T>(size)), size(size) {}
+  MallocedBuffer(T* data, size_t size) : data(data), size(size) {}
+  MallocedBuffer(MallocedBuffer&& other) : data(other.data), size(other.size) {
+    other.data = nullptr;
+  }
+  MallocedBuffer& operator=(MallocedBuffer&& other) {
+    this->~MallocedBuffer();
+    return *new(this) MallocedBuffer(std::move(other));
+  }
+  ~MallocedBuffer() {
+    free(data);
+  }
+  MallocedBuffer(const MallocedBuffer&) = delete;
+  MallocedBuffer& operator=(const MallocedBuffer&) = delete;
+};
+
+// Test whether some value can be called with ().
+template <typename T, typename = void>
+struct is_callable : std::is_function<T> { };
+
+template <typename T>
+struct is_callable<T, typename std::enable_if<
+    std::is_same<decltype(void(&T::operator())), void>::value
+    >::type> : std::true_type { };
+
+template <typename T, void (*function)(T*)>
+struct FunctionDeleter {
+  void operator()(T* pointer) const { function(pointer); }
+  typedef std::unique_ptr<T, FunctionDeleter> Pointer;
+};
+
+template <typename T, void (*function)(T*)>
+using DeleteFnPtr = typename FunctionDeleter<T, function>::Pointer;
+
+std::set<std::string> ParseCommaSeparatedSet(const std::string& in);
+
+inline v8::MaybeLocal<v8::Value> ToV8Value(v8::Local<v8::Context> context,
+                                           const std::string& str);
+template <typename T>
+inline v8::MaybeLocal<v8::Value> ToV8Value(v8::Local<v8::Context> context,
+                                           const std::vector<T>& vec);
+template <typename T, typename U>
+inline v8::MaybeLocal<v8::Value> ToV8Value(v8::Local<v8::Context> context,
+                                           const std::unordered_map<T, U>& map);
+
+}  // namespace node
 
 #endif  // defined(NODE_WANT_INTERNALS) && NODE_WANT_INTERNALS
 

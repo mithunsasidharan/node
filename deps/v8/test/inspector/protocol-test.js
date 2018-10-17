@@ -120,6 +120,12 @@ InspectorTest.ContextGroup = class {
     utils.compileAndRunWithOrigin(this.id, string, url || '', lineOffset || 0, columnOffset || 0, false);
   }
 
+  addInlineScript(string, url) {
+    const match = (new Error().stack).split('\n')[2].match(/([0-9]+):([0-9]+)/);
+    this.addScript(
+        string, match[1] * 1, match[1] * 1 + '.addInlineScript('.length, url);
+  }
+
   addModule(string, url, lineOffset, columnOffset) {
     utils.compileAndRunWithOrigin(this.id, string, url, lineOffset || 0, columnOffset || 0, true);
   }
@@ -213,7 +219,8 @@ InspectorTest.Session = class {
   logCallFrames(callFrames) {
     for (var frame of callFrames) {
       var functionName = frame.functionName || '(anonymous)';
-      var url = frame.url ? frame.url : this._scriptMap.get(frame.location.scriptId).url;
+      var scriptId = frame.location ? frame.location.scriptId : frame.scriptId;
+      var url = frame.url ? frame.url : this._scriptMap.get(scriptId).url;
       var lineNumber = frame.location ? frame.location.lineNumber : frame.lineNumber;
       var columnNumber = frame.location ? frame.location.columnNumber : frame.columnNumber;
       InspectorTest.log(`${functionName} (${url}:${lineNumber}:${columnNumber})`);
@@ -309,6 +316,8 @@ InspectorTest.Session = class {
   }
 
   _sendCommandPromise(method, params) {
+    if (typeof params !== 'object')
+      utils.print(`WARNING: non-object params passed to invocation of method ${method}`);
     if (InspectorTest._commandsForLogging.has(method))
       utils.print(method + ' called');
     var requestId = ++this._requestId;

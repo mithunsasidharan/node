@@ -223,6 +223,27 @@ countdown.dec();
 countdown.dec(); // The countdown callback will be invoked now.
 ```
 
+#### Testing promises
+
+When writing tests involving promises, it is generally good to wrap the
+`onFulfilled` handler, otherwise the test could successfully finish if the
+promise never resolves (pending promises do not keep the event loop alive). The
+`common` module automatically adds a handler that makes the process crash - and
+hence, the test fail - in the case of an `unhandledRejection` event. It is
+possible to disable it with `common.disableCrashOnUnhandledRejection()` if
+needed.
+
+```javascript
+const common = require('../common');
+const assert = require('assert');
+const fs = require('fs').promises;
+
+// Wrap the `onFulfilled` handler in `common.mustCall()`.
+fs.readFile('test-file').then(
+  common.mustCall(
+    (content) => assert.strictEqual(content.toString(), 'test2')
+  ));
+```
 
 ### Flags
 
@@ -370,6 +391,16 @@ The test can be executed by running the `cctest` target:
 
 ```console
 $ make cctest
+```
+
+A filter can be applied to run single/multiple test cases:
+```console
+$ make cctest GTEST_FILTER=EnvironmentTest.AtExitWithArgument
+```
+
+`cctest` can also be run directly which can be useful when debugging:
+```console
+$ out/Release/cctest --gtest_filter=EnvironmentTest.AtExit*
 ```
 
 ### Node.js test fixture

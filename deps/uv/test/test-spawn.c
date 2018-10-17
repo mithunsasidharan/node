@@ -1637,8 +1637,8 @@ TEST_IMPL(spawn_reads_child_path) {
   static const char dyld_path_var[] = "LD_LIBRARY_PATH";
 #endif
 
-  /* Set up the process, but make sure that the file to run is relative and */
-  /* requires a lookup into PATH */
+  /* Set up the process, but make sure that the file to run is relative and
+   * requires a lookup into PATH. */
   init_process_options("spawn_helper1", exit_cb);
 
   /* Set up the PATH env variable */
@@ -1733,6 +1733,7 @@ TEST_IMPL(spawn_inherit_streams) {
   uv_buf_t buf;
   unsigned int i;
   int r;
+  int bidir;
   uv_write_t write_req;
   uv_loop_t* loop;
 
@@ -1751,6 +1752,15 @@ TEST_IMPL(spawn_inherit_streams) {
   ASSERT(uv_pipe_open(&pipe_stdout_child, fds_stdout[1]) == 0);
   ASSERT(uv_pipe_open(&pipe_stdin_parent, fds_stdin[1]) == 0);
   ASSERT(uv_pipe_open(&pipe_stdout_parent, fds_stdout[0]) == 0);
+  ASSERT(uv_is_readable((uv_stream_t*) &pipe_stdin_child));
+  ASSERT(uv_is_writable((uv_stream_t*) &pipe_stdout_child));
+  ASSERT(uv_is_writable((uv_stream_t*) &pipe_stdin_parent));
+  ASSERT(uv_is_readable((uv_stream_t*) &pipe_stdout_parent));
+  /* Some systems (SVR4) open a bidirectional pipe, most don't. */
+  bidir = uv_is_writable((uv_stream_t*) &pipe_stdin_child);
+  ASSERT(uv_is_readable((uv_stream_t*) &pipe_stdout_child) == bidir);
+  ASSERT(uv_is_readable((uv_stream_t*) &pipe_stdin_parent) == bidir);
+  ASSERT(uv_is_writable((uv_stream_t*) &pipe_stdout_parent) == bidir);
 
   child_stdio[0].flags = UV_INHERIT_STREAM;
   child_stdio[0].data.stream = (uv_stream_t *)&pipe_stdin_child;
@@ -1805,8 +1815,8 @@ TEST_IMPL(spawn_quoted_path) {
   options.args = args;
   options.exit_cb = exit_cb;
   options.flags = 0;
-  /* We test if search_path works correctly with semicolons in quoted path. */
-  /* We will use invalid drive, so we are sure no executable is spawned */
+  /* We test if search_path works correctly with semicolons in quoted path. We
+   * will use an invalid drive, so we are sure no executable is spawned. */
   quoted_path_env[0] = "PATH=\"xyz:\\test;\";xyz:\\other";
   quoted_path_env[1] = NULL;
   options.env = quoted_path_env;

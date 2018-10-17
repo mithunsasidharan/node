@@ -255,16 +255,9 @@ class StreamResource {
 
 class StreamBase : public StreamResource {
  public:
-  enum Flags {
-    kFlagNone = 0x0,
-    kFlagHasWritev = 0x1,
-    kFlagNoShutdown = 0x2
-  };
-
   template <class Base>
   static inline void AddMethods(Environment* env,
-                                v8::Local<v8::FunctionTemplate> target,
-                                int flags = kFlagNone);
+                                v8::Local<v8::FunctionTemplate> target);
 
   virtual bool IsAlive() = 0;
   virtual bool IsClosing() = 0;
@@ -351,10 +344,12 @@ class SimpleShutdownWrap : public ShutdownWrap, public OtherBase {
  public:
   SimpleShutdownWrap(StreamBase* stream,
                      v8::Local<v8::Object> req_wrap_obj);
-  ~SimpleShutdownWrap();
 
   AsyncWrap* GetAsyncWrap() override { return this; }
-  size_t self_size() const override { return sizeof(*this); }
+
+  SET_NO_MEMORY_INFO()
+  SET_MEMORY_INFO_NAME(SimpleShutdownWrap)
+  SET_SELF_SIZE(SimpleShutdownWrap)
 };
 
 template <typename OtherBase>
@@ -362,10 +357,12 @@ class SimpleWriteWrap : public WriteWrap, public OtherBase {
  public:
   SimpleWriteWrap(StreamBase* stream,
                   v8::Local<v8::Object> req_wrap_obj);
-  ~SimpleWriteWrap();
 
   AsyncWrap* GetAsyncWrap() override { return this; }
-  size_t self_size() const override { return sizeof(*this) + StorageSize(); }
+
+  SET_NO_MEMORY_INFO()
+  SET_MEMORY_INFO_NAME(SimpleWriteWrap)
+  SET_SELF_SIZE(SimpleWriteWrap)
 };
 
 }  // namespace node

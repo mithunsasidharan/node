@@ -24,7 +24,7 @@ class HeapSnapshot;
 class SamplingHeapProfiler;
 class StringsStorage;
 
-class HeapProfiler {
+class HeapProfiler : public HeapObjectAllocationTracker {
  public:
   explicit HeapProfiler(Heap* heap);
   ~HeapProfiler();
@@ -57,9 +57,9 @@ class HeapProfiler {
 
   void ObjectMoveEvent(Address from, Address to, int size);
 
-  void AllocationEvent(Address addr, int size);
+  void AllocationEvent(Address addr, int size) override;
 
-  void UpdateObjectSizeEvent(Address addr, int size);
+  void UpdateObjectSizeEvent(Address addr, int size) override;
 
   void DefineWrapperClass(
       uint16_t class_id, v8::HeapProfiler::WrapperInfoCallback callback);
@@ -71,20 +71,21 @@ class HeapProfiler {
       v8::HeapProfiler::GetRetainerInfosCallback callback);
   v8::HeapProfiler::RetainerInfos GetRetainerInfos(Isolate* isolate);
 
-  void SetBuildEmbedderGraphCallback(
-      v8::HeapProfiler::BuildEmbedderGraphCallback callback);
+  void AddBuildEmbedderGraphCallback(
+      v8::HeapProfiler::BuildEmbedderGraphCallback callback, void* data);
+  void RemoveBuildEmbedderGraphCallback(
+      v8::HeapProfiler::BuildEmbedderGraphCallback callback, void* data);
   void BuildEmbedderGraph(Isolate* isolate, v8::EmbedderGraph* graph);
   bool HasBuildEmbedderGraphCallback() {
-    return build_embedder_graph_callback_ != nullptr;
+    return !build_embedder_graph_callbacks_.empty();
   }
 
   bool is_tracking_object_moves() const { return is_tracking_object_moves_; }
-  bool is_tracking_allocations() const { return !!allocation_tracker_; }
 
   Handle<HeapObject> FindHeapObjectById(SnapshotObjectId id);
   void ClearHeapObjectMap();
 
-  Isolate* isolate() const { return heap()->isolate(); }
+  Isolate* isolate() const;
 
   void QueryObjects(Handle<Context> context,
                     debug::QueryObjectPredicate* predicate,
@@ -104,8 +105,8 @@ class HeapProfiler {
   std::unique_ptr<SamplingHeapProfiler> sampling_heap_profiler_;
   v8::HeapProfiler::GetRetainerInfosCallback get_retainer_infos_callback_ =
       nullptr;
-  v8::HeapProfiler::BuildEmbedderGraphCallback build_embedder_graph_callback_ =
-      nullptr;
+  std::vector<std::pair<v8::HeapProfiler::BuildEmbedderGraphCallback, void*>>
+      build_embedder_graph_callbacks_;
 
   DISALLOW_COPY_AND_ASSIGN(HeapProfiler);
 };

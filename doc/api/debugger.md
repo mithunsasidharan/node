@@ -117,8 +117,8 @@ To begin watching an expression, type `watch('my_expression')`. The command
 * `setBreakpoint('fn()')`, `sb(...)` - Set breakpoint on a first statement in
 functions body
 * `setBreakpoint('script.js', 1)`, `sb(...)` - Set breakpoint on first line of
-script.js
-* `clearBreakpoint('script.js', 1)`, `cb(...)` - Clear breakpoint in script.js
+`script.js`
+* `clearBreakpoint('script.js', 1)`, `cb(...)` - Clear breakpoint in `script.js`
 on line 1
 
 It is also possible to set a breakpoint in a file (module) that
@@ -187,12 +187,15 @@ flag instead of `--inspect`.
 $ node --inspect index.js
 Debugger listening on 127.0.0.1:9229.
 To start debugging, open the following URL in Chrome:
-    chrome-devtools://devtools/bundled/inspector.html?experiments=true&v8only=true&ws=127.0.0.1:9229/dc9010dd-f8b8-4ac5-a510-c1a114ec7d29
+    chrome-devtools://devtools/bundled/js_app.html?experiments=true&v8only=true&ws=127.0.0.1:9229/dc9010dd-f8b8-4ac5-a510-c1a114ec7d29
 ```
 
 (In the example above, the UUID dc9010dd-f8b8-4ac5-a510-c1a114ec7d29
 at the end of the URL is generated on the fly, it varies in different
 debugging sessions.)
+
+If the Chrome browser is older than 66.0.3345.0,
+use `inspector.html` instead of `js_app.html` in the above URL.
 
 [Chrome DevTools Protocol]: https://chromedevtools.github.io/devtools-protocol/
 [V8 Inspector]: #debugger_v8_inspector_integration_for_node_js

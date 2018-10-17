@@ -42,6 +42,7 @@ enum class FeedbackSlotKind {
   kStoreNamedStrict,
   kStoreOwnNamed,
   kStoreKeyedStrict,
+  kStoreInArrayLiteral,
   kBinaryOp,
   kCompareOp,
   kStoreDataPropertyInLiteral,
@@ -50,6 +51,7 @@ enum class FeedbackSlotKind {
   kLiteral,
   kForIn,
   kInstanceOf,
+  kCloneObject,
 
   kKindsNumber  // Last value indicating number of kinds.
 };
@@ -94,12 +96,20 @@ inline bool IsKeyedStoreICKind(FeedbackSlotKind kind) {
          kind == FeedbackSlotKind::kStoreKeyedStrict;
 }
 
+inline bool IsStoreInArrayLiteralICKind(FeedbackSlotKind kind) {
+  return kind == FeedbackSlotKind::kStoreInArrayLiteral;
+}
+
 inline bool IsGlobalICKind(FeedbackSlotKind kind) {
   return IsLoadGlobalICKind(kind) || IsStoreGlobalICKind(kind);
 }
 
 inline bool IsTypeProfileKind(FeedbackSlotKind kind) {
   return kind == FeedbackSlotKind::kTypeProfile;
+}
+
+inline bool IsCloneObjectKind(FeedbackSlotKind kind) {
+  return kind == FeedbackSlotKind::kCloneObject;
 }
 
 inline TypeofMode GetTypeofModeFromSlotKind(FeedbackSlotKind kind) {
@@ -124,7 +134,7 @@ inline LanguageMode GetLanguageModeFromSlotKind(FeedbackSlotKind kind) {
 
 std::ostream& operator<<(std::ostream& os, FeedbackSlotKind kind);
 
-typedef std::vector<Handle<Object>> ObjectHandles;
+typedef std::vector<MaybeObjectHandle> MaybeObjectHandles;
 
 class FeedbackMetadata;
 
@@ -135,8 +145,13 @@ class FeedbackMetadata;
 //  - optimized code cell (weak cell or Smi marker)
 // followed by an array of feedback slots, of length determined by the feedback
 // metadata.
-class FeedbackVector : public HeapObject {
+class FeedbackVector : public HeapObject, public NeverReadOnlySpaceObject {
  public:
+  // Use the mixin methods over the HeapObject methods.
+  // TODO(v8:7786) Remove once the HeapObject methods are gone.
+  using NeverReadOnlySpaceObject::GetHeap;
+  using NeverReadOnlySpaceObject::GetIsolate;
+
   // Casting.
   static inline FeedbackVector* cast(Object* obj);
 
@@ -151,9 +166,9 @@ class FeedbackVector : public HeapObject {
   // feedback vector.
   DECL_ACCESSORS(shared_function_info, SharedFunctionInfo)
 
-  // [optimized_code_cell]: WeakCell containing optimized code or a Smi marker
-  // defining optimization behaviour.
-  DECL_ACCESSORS(optimized_code_cell, Object)
+  // [optimized_code_weak_or_smi]: weak reference to optimized code or a Smi
+  // marker defining optimization behaviour.
+  DECL_ACCESSORS(optimized_code_weak_or_smi, MaybeObject)
 
   // [length]: The length of the feedback vector (not including the header, i.e.
   // the number of feedback slots).
@@ -191,15 +206,19 @@ class FeedbackVector : public HeapObject {
 
   // Conversion from an integer index to the underlying array to a slot.
   static inline FeedbackSlot ToSlot(int index);
-  inline Object* Get(FeedbackSlot slot) const;
-  inline Object* get(int index) const;
+  inline MaybeObject* Get(FeedbackSlot slot) const;
+  inline MaybeObject* get(int index) const;
+  inline void Set(FeedbackSlot slot, MaybeObject* value,
+                  WriteBarrierMode mode = UPDATE_WRITE_BARRIER);
+  inline void set(int index, MaybeObject* value,
+                  WriteBarrierMode mode = UPDATE_WRITE_BARRIER);
   inline void Set(FeedbackSlot slot, Object* value,
                   WriteBarrierMode mode = UPDATE_WRITE_BARRIER);
   inline void set(int index, Object* value,
                   WriteBarrierMode mode = UPDATE_WRITE_BARRIER);
 
   // Gives access to raw memory which stores the array's data.
-  inline Object** slots_start();
+  inline MaybeObject** slots_start();
 
   // Returns slot kind for given slot.
   FeedbackSlotKind GetKind(FeedbackSlot slot) const;
@@ -208,9 +227,6 @@ class FeedbackVector : public HeapObject {
 
   V8_EXPORT_PRIVATE static Handle<FeedbackVector> New(
       Isolate* isolate, Handle<SharedFunctionInfo> shared);
-
-  static Handle<FeedbackVector> Copy(Isolate* isolate,
-                                     Handle<FeedbackVector> vector);
 
 #define DEFINE_SLOT_KIND_PREDICATE(Name) \
   bool Name(FeedbackSlot slot) const { return Name##Kind(GetKind(slot)); }
@@ -237,10 +253,7 @@ class FeedbackVector : public HeapObject {
     return GetLanguageModeFromSlotKind(GetKind(slot));
   }
 
-#ifdef OBJECT_PRINT
-  // For gdb debugging.
-  void Print();
-#endif  // OBJECT_PRINT
+  static void AssertNoLegacyTypes(MaybeObject* object);
 
   DECL_PRINTER(FeedbackVector)
   DECL_VERIFIER(FeedbackVector)
@@ -364,6 +377,10 @@ class V8_EXPORT_PRIVATE FeedbackVectorSpec {
                        : FeedbackSlotKind::kStoreKeyedSloppy);
   }
 
+  FeedbackSlot AddStoreInArrayLiteralICSlot() {
+    return AddSlot(FeedbackSlotKind::kStoreInArrayLiteral);
+  }
+
   FeedbackSlot AddBinaryOpICSlot() {
     return AddSlot(FeedbackSlotKind::kBinaryOp);
   }
@@ -386,6 +403,10 @@ class V8_EXPORT_PRIVATE FeedbackVectorSpec {
 
   FeedbackSlot AddTypeProfileSlot();
 
+  FeedbackSlot AddCloneObjectSlot() {
+    return AddSlot(FeedbackSlotKind::kCloneObject);
+  }
+
 #ifdef OBJECT_PRINT
   // For gdb debugging.
   void Print();
@@ -403,19 +424,21 @@ class V8_EXPORT_PRIVATE FeedbackVectorSpec {
   ZoneVector<unsigned char> slot_kinds_;
 };
 
-// The shape of the FeedbackMetadata is an array with:
-// 0: slot_count
-// 1: names table
-// 2: parameters table
-// 3..N: slot kinds packed into a bit vector
-//
-class FeedbackMetadata : public FixedArray {
+// FeedbackMetadata is an array-like object with a slot count (indicating how
+// many slots are stored). We save space by packing several slots into an array
+// of int32 data. The length is never stored - it is always calculated from
+// slot_count. All instances are created through the static New function, and
+// the number of slots is static once an instance is created.
+class FeedbackMetadata : public HeapObject {
  public:
   // Casting.
   static inline FeedbackMetadata* cast(Object* obj);
 
-  static const int kSlotsCountIndex = 0;
-  static const int kReservedIndexCount = 1;
+  // The number of slots that this metadata contains. Stored as an int32.
+  DECL_INT32_ACCESSORS(slot_count)
+
+  // Get slot_count using an acquire load.
+  inline int32_t synchronized_slot_count() const;
 
   // Returns number of feedback vector elements used by given slot kind.
   static inline int GetSlotSize(FeedbackSlotKind kind);
@@ -424,9 +447,6 @@ class FeedbackMetadata : public FixedArray {
 
   inline bool is_empty() const;
 
-  // Returns number of slots in the vector.
-  inline int slot_count() const;
-
   // Returns slot kind for given slot.
   FeedbackSlotKind GetKind(FeedbackSlot slot) const;
 
@@ -434,18 +454,39 @@ class FeedbackMetadata : public FixedArray {
   V8_EXPORT_PRIVATE static Handle<FeedbackMetadata> New(
       Isolate* isolate, const FeedbackVectorSpec* spec = nullptr);
 
-#ifdef OBJECT_PRINT
-  // For gdb debugging.
-  void Print();
-#endif  // OBJECT_PRINT
-
   DECL_PRINTER(FeedbackMetadata)
+  DECL_VERIFIER(FeedbackMetadata)
 
   static const char* Kind2String(FeedbackSlotKind kind);
   bool HasTypeProfileSlot() const;
 
+  // Garbage collection support.
+  // This includes any necessary padding at the end of the object for pointer
+  // size alignment.
+  static int SizeFor(int slot_count) {
+    return OBJECT_POINTER_ALIGN(kHeaderSize + length(slot_count) * kInt32Size);
+  }
+
+  static const int kSlotCountOffset = HeapObject::kHeaderSize;
+  static const int kHeaderSize = kSlotCountOffset + kInt32Size;
+
+  class BodyDescriptor;
+  // No weak fields.
+  typedef BodyDescriptor BodyDescriptorWeak;
+
  private:
   friend class AccessorAssembler;
+
+  // Raw accessors to the encoded slot data.
+  inline int32_t get(int index) const;
+  inline void set(int index, int32_t value);
+
+  // The number of int32 data fields needed to store {slot_count} slots.
+  // Does not include any extra padding for pointer size alignment.
+  static int length(int slot_count) {
+    return VectorICComputer::word_count(slot_count);
+  }
+  inline int length() const;
 
   static const int kFeedbackSlotKindBits = 5;
   STATIC_ASSERT(static_cast<int>(FeedbackSlotKind::kKindsNumber) <
@@ -453,21 +494,13 @@ class FeedbackMetadata : public FixedArray {
 
   void SetKind(FeedbackSlot slot, FeedbackSlotKind kind);
 
-  typedef BitSetComputer<FeedbackSlotKind, kFeedbackSlotKindBits, kSmiValueSize,
-                         uint32_t>
+  typedef BitSetComputer<FeedbackSlotKind, kFeedbackSlotKindBits,
+                         kInt32Size * kBitsPerByte, uint32_t>
       VectorICComputer;
 
   DISALLOW_IMPLICIT_CONSTRUCTORS(FeedbackMetadata);
 };
 
-// The following asserts protect an optimization in type feedback vector
-// code that looks into the contents of a slot assuming to find a String,
-// a Symbol, an AllocationSite, a WeakCell, or a FixedArray.
-STATIC_ASSERT(WeakCell::kSize >= 2 * kPointerSize);
-STATIC_ASSERT(WeakCell::kValueOffset ==
-              AllocationSite::kTransitionInfoOrBoilerplateOffset);
-STATIC_ASSERT(WeakCell::kValueOffset == FixedArray::kLengthOffset);
-STATIC_ASSERT(WeakCell::kValueOffset == Name::kHashFieldSlot);
 // Verify that an empty hash field looks like a tagged object, but can't
 // possibly be confused with a pointer.
 STATIC_ASSERT((Name::kEmptyHashField & kHeapObjectTag) == kHeapObjectTag);
@@ -558,8 +591,8 @@ class FeedbackNexus final {
 
   InlineCacheState StateFromFeedback() const;
   int ExtractMaps(MapHandles* maps) const;
-  MaybeHandle<Object> FindHandlerForMap(Handle<Map> map) const;
-  bool FindHandlers(ObjectHandles* code_list, int length = -1) const;
+  MaybeObjectHandle FindHandlerForMap(Handle<Map> map) const;
+  bool FindHandlers(MaybeObjectHandles* code_list, int length = -1) const;
 
   bool IsCleared() const {
     InlineCacheState state = StateFromFeedback();
@@ -569,19 +602,22 @@ class FeedbackNexus final {
   // Clear() returns true if the state of the underlying vector was changed.
   bool Clear();
   void ConfigureUninitialized();
-  void ConfigurePremonomorphic();
+  void ConfigurePremonomorphic(Handle<Map> receiver_map);
+  // ConfigureMegamorphic() returns true if the state of the underlying vector
+  // was changed. Extra feedback is cleared if the 0 parameter version is used.
+  bool ConfigureMegamorphic();
   bool ConfigureMegamorphic(IcCheckType property_type);
 
-  inline Object* GetFeedback() const;
-  inline Object* GetFeedbackExtra() const;
+  inline MaybeObject* GetFeedback() const;
+  inline MaybeObject* GetFeedbackExtra() const;
 
   inline Isolate* GetIsolate() const;
 
   void ConfigureMonomorphic(Handle<Name> name, Handle<Map> receiver_map,
-                            Handle<Object> handler);
+                            const MaybeObjectHandle& handler);
 
   void ConfigurePolymorphic(Handle<Name> name, MapHandles const& maps,
-                            ObjectHandles* handlers);
+                            MaybeObjectHandles* handlers);
 
   BinaryOperationHint GetBinaryOperationFeedback() const;
   CompareOperationHint GetCompareOperationFeedback() const;
@@ -620,7 +656,11 @@ class FeedbackNexus final {
   // Returns false if given combination of indices is not allowed.
   bool ConfigureLexicalVarMode(int script_context_index,
                                int context_slot_index);
-  void ConfigureHandlerMode(Handle<Object> handler);
+  void ConfigureHandlerMode(const MaybeObjectHandle& handler);
+
+  // For CloneObject ICs
+  static constexpr int kCloneObjectPolymorphicEntrySize = 2;
+  void ConfigureCloneObject(Handle<Map> source_map, Handle<Map> result_map);
 
 // Bit positions in a smi that encodes lexical environment variable access.
 #define LEXICAL_MODE_BIT_FIELDS(V, _)  \
@@ -644,14 +684,17 @@ class FeedbackNexus final {
   std::vector<int> GetSourcePositions() const;
   std::vector<Handle<String>> GetTypesForSourcePositions(uint32_t pos) const;
 
- protected:
   inline void SetFeedback(Object* feedback,
+                          WriteBarrierMode mode = UPDATE_WRITE_BARRIER);
+  inline void SetFeedback(MaybeObject* feedback,
                           WriteBarrierMode mode = UPDATE_WRITE_BARRIER);
   inline void SetFeedbackExtra(Object* feedback_extra,
                                WriteBarrierMode mode = UPDATE_WRITE_BARRIER);
+  inline void SetFeedbackExtra(MaybeObject* feedback_extra,
+                               WriteBarrierMode mode = UPDATE_WRITE_BARRIER);
 
-  Handle<FixedArray> EnsureArrayOfSize(int length);
-  Handle<FixedArray> EnsureExtraArrayOfSize(int length);
+  Handle<WeakFixedArray> EnsureArrayOfSize(int length);
+  Handle<WeakFixedArray> EnsureExtraArrayOfSize(int length);
 
  private:
   // The reason for having a vector handle and a raw pointer is that we can and

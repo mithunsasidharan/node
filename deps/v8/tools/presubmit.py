@@ -60,7 +60,9 @@ LINT_RULES = """
 -build/header_guard
 -build/include_what_you_use
 -readability/fn_size
+-readability/multiline_comment
 -runtime/references
+-whitespace/comments
 """.split()
 
 LINT_OUTPUT_PATTERN = re.compile(r'^.+[:(]\d+[:)]|^Done processing')
@@ -281,7 +283,7 @@ class SourceProcessor(SourceFileProcessor):
   Check that all files include a copyright notice and no trailing whitespaces.
   """
 
-  RELEVANT_EXTENSIONS = ['.js', '.cc', '.h', '.py', '.c', '.status']
+  RELEVANT_EXTENSIONS = ['.js', '.cc', '.h', '.py', '.c', '.status', '.tq', '.g4']
 
   def __init__(self):
     self.runtime_function_call_pattern = self.CreateRuntimeFunctionCallMatcher()
@@ -295,7 +297,7 @@ class SourceProcessor(SourceFileProcessor):
         m = pattern.match(line)
         if m:
           runtime_functions.append(m.group(1))
-    if len(runtime_functions) < 500:
+    if len(runtime_functions) < 450:
       print ("Runtime functions list is suspiciously short. "
              "Consider updating the presubmit script.")
       sys.exit(1)

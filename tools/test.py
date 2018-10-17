@@ -54,6 +54,7 @@ skip_regex = re.compile(r'# SKIP\S*\s+(.*)', re.IGNORECASE)
 
 VERBOSE = False
 
+os.environ['NODE_OPTIONS'] = ''
 
 # ---------------------------------------------
 # --- P r o g r e s s   I n d i c a t o r s ---
@@ -130,7 +131,7 @@ class ProgressIndicator(object):
           test = self.sequential_queue.get_nowait()
         except Empty:
           return
-      case = test.case
+      case = test
       case.thread_id = thread_id
       self.lock.acquire()
       self.AboutToRun(case)
@@ -297,10 +298,8 @@ class TapProgressIndicator(SimpleProgressIndicator):
 
       if output.HasCrashed():
         self.severity = 'crashed'
-        exit_code = output.output.exit_code
-        self.traceback = "oh no!\nexit code: " + PrintCrashed(exit_code)
 
-      if output.HasTimedOut():
+      elif output.HasTimedOut():
         self.severity = 'fail'
 
     else:
@@ -332,7 +331,7 @@ class TapProgressIndicator(SimpleProgressIndicator):
       (total_seconds, duration.microseconds / 1000))
     if self.severity is not 'ok' or self.traceback is not '':
       if output.HasTimedOut():
-        self.traceback = 'timeout'
+        self.traceback = 'timeout\n' + output.output.stdout + output.output.stderr
       self._printDiagnostic()
     logger.info('  ...')
 
@@ -518,21 +517,12 @@ class TestCase(object):
                      self.context.GetTimeout(self.mode),
                      env,
                      disable_core_files = self.disable_core_files)
-    self.Cleanup()
     return TestOutput(self,
                       full_command,
                       output,
                       self.context.store_unexpected_output)
 
-  def BeforeRun(self):
-    pass
-
-  def AfterRun(self, result):
-    pass
-
   def Run(self):
-    self.BeforeRun()
-
     try:
       result = self.RunCommand(self.GetCommand(), {
         "TEST_THREAD_ID": "%d" % self.thread_id,
@@ -548,11 +538,7 @@ class TestCase(object):
         from os import O_NONBLOCK
         for fd in 0,1,2: fcntl(fd, F_SETFL, ~O_NONBLOCK & fcntl(fd, F_GETFL))
 
-    self.AfterRun(result)
     return result
-
-  def Cleanup(self):
-    return
 
 
 class TestOutput(object):
@@ -719,12 +705,23 @@ def CheckedUnlink(name):
       PrintError("os.unlink() " + str(e))
     break
 
-def Execute(args, context, timeout=None, env={}, faketty=False, disable_core_files=False):
+def Execute(args, context, timeout=None, env={}, faketty=False, disable_core_files=False, input=None):
   if faketty:
     import pty
     (out_master, fd_out) = pty.openpty()
     fd_in = fd_err = fd_out
     pty_out = out_master
+
+    if input is not None:
+      # Before writing input data, disable echo so the input doesn't show
+      # up as part of the output.
+      import termios
+      attr = termios.tcgetattr(fd_in)
+      attr[3] = attr[3] & ~termios.ECHO
+      termios.tcsetattr(fd_in, termios.TCSADRAIN, attr)
+
+      os.write(pty_out, input)
+      os.write(pty_out, '\x04') # End-of-file marker (Ctrl+D)
   else:
     (fd_out, outname) = tempfile.mkstemp()
     (fd_err, errname) = tempfile.mkstemp()
@@ -783,10 +780,10 @@ def CarCdr(path):
 
 
 class TestConfiguration(object):
-
-  def __init__(self, context, root):
+  def __init__(self, context, root, section):
     self.context = context
     self.root = root
+    self.section = section
 
   def Contains(self, path, file):
     if len(path) > len(file):
@@ -797,7 +794,9 @@ class TestConfiguration(object):
     return True
 
   def GetTestStatus(self, sections, defs):
-    pass
+    status_file = join(self.root, '%s.status' % self.section)
+    if exists(status_file):
+      ReadConfigurationInto(status_file, sections, defs)
 
 
 class TestSuite(object):
@@ -851,15 +850,15 @@ class TestRepository(TestSuite):
 
 
 class LiteralTestSuite(TestSuite):
-
-  def __init__(self, tests):
+  def __init__(self, tests_repos, test_root):
     super(LiteralTestSuite, self).__init__('root')
-    self.tests = tests
+    self.tests_repos = tests_repos
+    self.test_root = test_root
 
   def GetBuildRequirements(self, path, context):
     (name, rest) = CarCdr(path)
     result = [ ]
-    for test in self.tests:
+    for test in self.tests_repos:
       if not name or name.match(test.GetName()):
         result += test.GetBuildRequirements(rest, context)
     return result
@@ -867,7 +866,7 @@ class LiteralTestSuite(TestSuite):
   def ListTests(self, current_path, path, context, arch, mode):
     (name, rest) = CarCdr(path)
     result = [ ]
-    for test in self.tests:
+    for test in self.tests_repos:
       test_name = test.GetName()
       if not name or name.match(test_name):
         full_path = current_path + [test_name]
@@ -876,8 +875,11 @@ class LiteralTestSuite(TestSuite):
     return result
 
   def GetTestStatus(self, context, sections, defs):
-    for test in self.tests:
-      test.GetTestStatus(context, sections, defs)
+    # Just read the test configuration from root_path/root.status.
+    root = TestConfiguration(context, self.test_root, 'root')
+    root.GetTestStatus(sections, defs)
+    for tests_repos in self.tests_repos:
+      tests_repos.GetTestStatus(context, sections, defs)
 
 
 TIMEOUT_SCALEFACTOR = {
@@ -937,6 +939,7 @@ def RunTestCases(cases_to_run, progress, tasks, flaky_tests_mode):
 # -------------------------------------------
 
 
+RUN = 'run'
 SKIP = 'skip'
 FAIL = 'fail'
 PASS = 'pass'
@@ -966,8 +969,8 @@ class Variable(Expression):
     self.name = name
 
   def GetOutcomes(self, env, defs):
-    if self.name in env: return ListSet([env[self.name]])
-    else: return Nothing()
+    if self.name in env: return set([env[self.name]])
+    else: return set()
 
 
 class Outcome(Expression):
@@ -979,45 +982,7 @@ class Outcome(Expression):
     if self.name in defs:
       return defs[self.name].GetOutcomes(env, defs)
     else:
-      return ListSet([self.name])
-
-
-class Set(object):
-  pass
-
-
-class ListSet(Set):
-
-  def __init__(self, elms):
-    self.elms = elms
-
-  def __str__(self):
-    return "ListSet%s" % str(self.elms)
-
-  def Intersect(self, that):
-    if not isinstance(that, ListSet):
-      return that.Intersect(self)
-    return ListSet([ x for x in self.elms if x in that.elms ])
-
-  def Union(self, that):
-    if not isinstance(that, ListSet):
-      return that.Union(self)
-    return ListSet(self.elms + [ x for x in that.elms if x not in self.elms ])
-
-  def IsEmpty(self):
-    return len(self.elms) == 0
-
-
-class Nothing(Set):
-
-  def Intersect(self, that):
-    return self
-
-  def Union(self, that):
-    return that
-
-  def IsEmpty(self):
-    return True
+      return set([self.name])
 
 
 class Operation(Expression):
@@ -1033,21 +998,23 @@ class Operation(Expression):
     elif self.op == 'if':
       return False
     elif self.op == '==':
-      inter = self.left.GetOutcomes(env, defs).Intersect(self.right.GetOutcomes(env, defs))
-      return not inter.IsEmpty()
+      inter = self.left.GetOutcomes(env, defs) & self.right.GetOutcomes(env, defs)
+      return bool(inter)
     else:
       assert self.op == '&&'
       return self.left.Evaluate(env, defs) and self.right.Evaluate(env, defs)
 
   def GetOutcomes(self, env, defs):
     if self.op == '||' or self.op == ',':
-      return self.left.GetOutcomes(env, defs).Union(self.right.GetOutcomes(env, defs))
+      return self.left.GetOutcomes(env, defs) | self.right.GetOutcomes(env, defs)
     elif self.op == 'if':
-      if self.right.Evaluate(env, defs): return self.left.GetOutcomes(env, defs)
-      else: return Nothing()
+      if self.right.Evaluate(env, defs):
+        return self.left.GetOutcomes(env, defs)
+      else:
+        return set()
     else:
       assert self.op == '&&'
-      return self.left.GetOutcomes(env, defs).Intersect(self.right.GetOutcomes(env, defs))
+      return self.left.GetOutcomes(env, defs) & self.right.GetOutcomes(env, defs)
 
 
 def IsAlpha(str):
@@ -1226,15 +1193,6 @@ def ParseCondition(expr):
   return ast
 
 
-class ClassifiedTest(object):
-
-  def __init__(self, case, outcomes):
-    self.case = case
-    self.outcomes = outcomes
-    self.parallel = self.case.parallel
-    self.disable_core_files = self.case.disable_core_files
-
-
 class Configuration(object):
   """The parsed contents of a configuration file"""
 
@@ -1243,23 +1201,18 @@ class Configuration(object):
     self.defs = defs
 
   def ClassifyTests(self, cases, env):
-    sections = [s for s in self.sections if s.condition.Evaluate(env, self.defs)]
+    sections = [ s for s in self.sections if s.condition.Evaluate(env, self.defs) ]
     all_rules = reduce(list.__add__, [s.rules for s in sections], [])
     unused_rules = set(all_rules)
-    result = [ ]
-    all_outcomes = set([])
+    result = []
     for case in cases:
       matches = [ r for r in all_rules if r.Contains(case.path) ]
-      outcomes = set([])
-      for rule in matches:
-        outcomes = outcomes.union(rule.GetOutcomes(env, self.defs))
-        unused_rules.discard(rule)
-      if not outcomes:
-        outcomes = [PASS]
-      case.outcomes = outcomes
-      all_outcomes = all_outcomes.union(outcomes)
-      result.append(ClassifiedTest(case, outcomes))
-    return (result, list(unused_rules), all_outcomes)
+      outcomes_list = [ r.GetOutcomes(env, self.defs) for r in matches ]
+      outcomes = reduce(set.union, outcomes_list, set())
+      unused_rules.difference_update(matches)
+      case.outcomes = set(outcomes) or set([PASS])
+      result.append(case)
+    return result, unused_rules
 
 
 class Section(object):
@@ -1284,9 +1237,7 @@ class Rule(object):
     self.value = value
 
   def GetOutcomes(self, env, defs):
-    set = self.value.GetOutcomes(env, defs)
-    assert isinstance(set, ListSet)
-    return set.elms
+    return self.value.GetOutcomes(env, defs)
 
   def Contains(self, path):
     if len(self.path) > len(path):
@@ -1376,6 +1327,8 @@ def BuildOptions():
       help="Expect test cases to fail", default=False, action="store_true")
   result.add_option("--valgrind", help="Run tests through valgrind",
       default=False, action="store_true")
+  result.add_option("--worker", help="Run parallel tests inside a worker context",
+      default=False, action="store_true")
   result.add_option("--check-deopts", help="Check tests for permanent deoptimizations",
       default=False, action="store_true")
   result.add_option("--cat", help="Print the source of the tests",
@@ -1383,6 +1336,9 @@ def BuildOptions():
   result.add_option("--flaky-tests",
       help="Regard tests marked as flaky (run|skip|dontcare)",
       default="run")
+  result.add_option("--skip-tests",
+      help="Tests that should not be executed (comma-separated)",
+      default="")
   result.add_option("--warn-unused", help="Report unused rules",
       default=False, action="store_true")
   result.add_option("-j", help="The number of parallel tasks to run",
@@ -1425,6 +1381,8 @@ def ProcessOptions(options):
   options.arch = options.arch.split(',')
   options.mode = options.mode.split(',')
   options.run = options.run.split(',')
+  options.skip_tests = options.skip_tests.split(',')
+  options.skip_tests.remove("")
   if options.run == [""]:
     options.run = None
   elif len(options.run) != 2:
@@ -1447,7 +1405,7 @@ def ProcessOptions(options):
     # tends to exaggerate the number of available cpus/cores.
     cores = os.environ.get('JOBS')
     options.j = int(cores) if cores is not None else multiprocessing.cpu_count()
-  if options.flaky_tests not in ["run", "skip", "dontcare"]:
+  if options.flaky_tests not in [RUN, SKIP, DONTCARE]:
     print "Unknown flaky-tests mode %s" % options.flaky_tests
     return False
   return True
@@ -1460,18 +1418,6 @@ Total: %(total)i tests
  * %(fail_ok)4d tests are expected to fail that we won't fix
  * %(fail)4d tests are expected to fail that we should fix\
 """
-
-def PrintReport(cases):
-  def IsFailOk(o):
-    return (len(o) == 2) and (FAIL in o) and (OKAY in o)
-  unskipped = [c for c in cases if not SKIP in c.outcomes]
-  print REPORT_TEMPLATE % {
-    'total': len(cases),
-    'skipped': len(cases) - len(unskipped),
-    'pass': len([t for t in unskipped if list(t.outcomes) == [PASS]]),
-    'fail_ok': len([t for t in unskipped if IsFailOk(t.outcomes)]),
-    'fail': len([t for t in unskipped if list(t.outcomes) == [FAIL]])
-  }
 
 
 class Pattern(object):
@@ -1531,6 +1477,14 @@ def FormatTime(d):
   return time.strftime("%M:%S.", time.gmtime(d)) + ("%03i" % millis)
 
 
+def FormatTimedelta(td):
+  if hasattr(td.total, 'total_seconds'):
+    d = td.total_seconds()
+  else: # python2.6 compat
+    d =  td.seconds + (td.microseconds / 10.0**6)
+  return FormatTime(d)
+
+
 def PrintCrashed(code):
   if utils.IsWindows():
     return "CRASHED"
@@ -1544,13 +1498,12 @@ def PrintCrashed(code):
 IGNORED_SUITES = [
   'addons',
   'addons-napi',
+  'code-cache',
   'doctool',
-  'gc',
   'internet',
   'pummel',
-  'test-known-issues',
   'tick-processor',
-  'timers'
+  'v8-updates'
 ]
 
 
@@ -1597,7 +1550,7 @@ def Main():
   repositories = [TestRepository(join(workspace, 'test', name)) for name in suites]
   repositories += [TestRepository(a) for a in options.suite]
 
-  root = LiteralTestSuite(repositories)
+  root = LiteralTestSuite(repositories, test_root)
   paths = ArgsToTestPaths(test_root, args, suites)
 
   # Check for --valgrind option. If enabled, we overwrite the special
@@ -1613,6 +1566,11 @@ def Main():
     # optimizer to kick in, so this flag will force it to run.
     options.node_args.append("--always-opt")
     options.progress = "deopts"
+
+  if options.worker:
+    run_worker = join(workspace, "tools", "run-worker.js")
+    options.node_args.append('--experimental-worker')
+    options.node_args.append(run_worker)
 
   shell = abspath(options.shell)
   buildspace = dirname(shell)
@@ -1663,8 +1621,7 @@ def Main():
         }
         test_list = root.ListTests([], path, context, arch, mode)
         unclassified_tests += test_list
-        (cases, unused_rules, _) = (
-            config.ClassifyTests(test_list, env))
+        cases, unused_rules = config.ClassifyTests(test_list, env)
         if globally_unused_rules is None:
           globally_unused_rules = set(unused_rules)
         else:
@@ -1706,20 +1663,32 @@ def Main():
         print "Could not create the temporary directory", options.temp_dir
         sys.exit(1)
 
-  if options.report:
-    PrintReport(all_cases)
-
-  result = None
-  def DoSkip(case):
-    if SKIP in case.outcomes or SLOW in case.outcomes:
+  def should_keep(case):
+    if any((s in case.file) for s in options.skip_tests):
+      return False
+    elif SKIP in case.outcomes:
+      return False
+    elif (options.flaky_tests == SKIP) and (set([SLOW, FLAKY]) & case.outcomes):
+      return False
+    else:
       return True
-    return FLAKY in case.outcomes and options.flaky_tests == SKIP
-  cases_to_run = [ c for c in all_cases if not DoSkip(c) ]
+
+  cases_to_run = filter(should_keep, all_cases)
+
+  if options.report:
+    print(REPORT_TEMPLATE % {
+      'total': len(all_cases),
+      'skipped': len(all_cases) - len(cases_to_run),
+      'pass': len([t for t in cases_to_run if PASS in t.outcomes]),
+      'fail_ok': len([t for t in cases_to_run if t.outcomes == set([FAIL, OKAY])]),
+      'fail': len([t for t in cases_to_run if t.outcomes == set([FAIL])])
+    })
+
   if options.run is not None:
     # Must ensure the list of tests is sorted before selecting, to avoid
     # silent errors if this file is changed to list the tests in a way that
     # can be different in different machines
-    cases_to_run.sort(key=lambda c: (c.case.arch, c.case.mode, c.case.file))
+    cases_to_run.sort(key=lambda c: (c.arch, c.mode, c.file))
     cases_to_run = [ cases_to_run[i] for i
                      in xrange(options.run[0],
                                len(cases_to_run),
@@ -1744,13 +1713,11 @@ def Main():
     # test output.
     print
     sys.stderr.write("--- Total time: %s ---\n" % FormatTime(duration))
-    timed_tests = [ t.case for t in cases_to_run if not t.case.duration is None ]
+    timed_tests = [ t for t in cases_to_run if not t.duration is None ]
     timed_tests.sort(lambda a, b: a.CompareTime(b))
-    index = 1
-    for entry in timed_tests[:20]:
-      t = FormatTime(entry.duration)
-      sys.stderr.write("%4i (%s) %s\n" % (index, t, entry.GetLabel()))
-      index += 1
+    for i, entry in enumerate(timed_tests[:20], start=1):
+      t = FormatTimedelta(entry.duration)
+      sys.stderr.write("%4i (%s) %s\n" % (i, t, entry.GetLabel()))
 
   return result
 

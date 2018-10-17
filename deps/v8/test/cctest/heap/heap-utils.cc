@@ -4,7 +4,7 @@
 
 #include "test/cctest/heap/heap-utils.h"
 
-#include "src/factory.h"
+#include "src/heap/factory.h"
 #include "src/heap/heap-inl.h"
 #include "src/heap/incremental-marking.h"
 #include "src/heap/mark-compact.h"
@@ -95,7 +95,7 @@ std::vector<Handle<FixedArray>> CreatePadding(Heap* heap, int padding_size,
       }
     }
     handles.push_back(isolate->factory()->NewFixedArray(length, tenure));
-    CHECK((tenure == NOT_TENURED && heap->InNewSpace(*handles.back())) ||
+    CHECK((tenure == NOT_TENURED && Heap::InNewSpace(*handles.back())) ||
           (tenure == TENURED && heap->InOldSpace(*handles.back())));
     free_memory -= allocate_memory;
   }

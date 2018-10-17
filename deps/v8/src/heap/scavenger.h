@@ -50,7 +50,7 @@ class Scavenger {
 
   inline Heap* heap() { return heap_; }
 
-  inline void PageMemoryFence(Object* object);
+  inline void PageMemoryFence(MaybeObject* object);
 
   void AddPageToSweeperIfNecessary(MemoryChunk* page);
 
@@ -61,24 +61,24 @@ class Scavenger {
 
   // Scavenges an object |object| referenced from slot |p|. |object| is required
   // to be in from space.
-  inline void ScavengeObject(HeapObject** p, HeapObject* object);
+  inline void ScavengeObject(HeapObjectReference** p, HeapObject* object);
 
   // Copies |source| to |target| and sets the forwarding pointer in |source|.
   V8_INLINE bool MigrateObject(Map* map, HeapObject* source, HeapObject* target,
                                int size);
 
-  V8_INLINE bool SemiSpaceCopyObject(Map* map, HeapObject** slot,
+  V8_INLINE bool SemiSpaceCopyObject(Map* map, HeapObjectReference** slot,
                                      HeapObject* object, int object_size);
 
-  V8_INLINE bool PromoteObject(Map* map, HeapObject** slot, HeapObject* object,
-                               int object_size);
+  V8_INLINE bool PromoteObject(Map* map, HeapObjectReference** slot,
+                               HeapObject* object, int object_size);
 
-  V8_INLINE void EvacuateObject(HeapObject** slot, Map* map,
+  V8_INLINE void EvacuateObject(HeapObjectReference** slot, Map* map,
                                 HeapObject* source);
 
   // Different cases for object evacuation.
 
-  V8_INLINE void EvacuateObjectDefault(Map* map, HeapObject** slot,
+  V8_INLINE void EvacuateObjectDefault(Map* map, HeapObjectReference** slot,
                                        HeapObject* object, int object_size);
 
   V8_INLINE void EvacuateJSFunction(Map* map, HeapObject** slot,
@@ -114,8 +114,7 @@ class Scavenger {
 // filtering out non-HeapObjects and objects which do not reside in new space.
 class RootScavengeVisitor final : public RootVisitor {
  public:
-  RootScavengeVisitor(Heap* heap, Scavenger* scavenger)
-      : heap_(heap), scavenger_(scavenger) {}
+  explicit RootScavengeVisitor(Scavenger* scavenger);
 
   void VisitRootPointer(Root root, const char* description, Object** p) final;
   void VisitRootPointers(Root root, const char* description, Object** start,
@@ -124,20 +123,19 @@ class RootScavengeVisitor final : public RootVisitor {
  private:
   void ScavengePointer(Object** p);
 
-  Heap* const heap_;
   Scavenger* const scavenger_;
 };
 
 class ScavengeVisitor final : public NewSpaceVisitor<ScavengeVisitor> {
  public:
-  ScavengeVisitor(Heap* heap, Scavenger* scavenger)
-      : heap_(heap), scavenger_(scavenger) {}
+  explicit ScavengeVisitor(Scavenger* scavenger);
 
   V8_INLINE void VisitPointers(HeapObject* host, Object** start,
                                Object** end) final;
+  V8_INLINE void VisitPointers(HeapObject* host, MaybeObject** start,
+                               MaybeObject** end) final;
 
  private:
-  Heap* const heap_;
   Scavenger* const scavenger_;
 };
 

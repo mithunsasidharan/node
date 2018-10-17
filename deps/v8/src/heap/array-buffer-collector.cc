@@ -4,25 +4,27 @@
 
 #include "src/heap/array-buffer-collector.h"
 
+#include "src/base/template-utils.h"
 #include "src/heap/array-buffer-tracker.h"
+#include "src/heap/gc-tracer.h"
 #include "src/heap/heap-inl.h"
 
 namespace v8 {
 namespace internal {
 
 void ArrayBufferCollector::AddGarbageAllocations(
-    std::vector<JSArrayBuffer::Allocation>* allocations) {
+    std::vector<JSArrayBuffer::Allocation> allocations) {
   base::LockGuard<base::Mutex> guard(&allocations_mutex_);
-  allocations_.push_back(allocations);
+  allocations_.push_back(std::move(allocations));
 }
 
 void ArrayBufferCollector::FreeAllocations() {
   base::LockGuard<base::Mutex> guard(&allocations_mutex_);
-  for (std::vector<JSArrayBuffer::Allocation>* allocations : allocations_) {
-    for (auto alloc : *allocations) {
+  for (const std::vector<JSArrayBuffer::Allocation>& allocations :
+       allocations_) {
+    for (JSArrayBuffer::Allocation alloc : allocations) {
       JSArrayBuffer::FreeBackingStore(heap_->isolate(), alloc);
     }
-    delete allocations;
   }
   allocations_.clear();
 }
@@ -46,11 +48,11 @@ class ArrayBufferCollector::FreeingTask final : public CancelableTask {
 };
 
 void ArrayBufferCollector::FreeAllocationsOnBackgroundThread() {
+  // TODO(wez): Remove backing-store from external memory accounting.
   heap_->account_external_memory_concurrently_freed();
-  if (heap_->use_tasks() && FLAG_concurrent_array_buffer_freeing) {
-    FreeingTask* task = new FreeingTask(heap_);
-    V8::GetCurrentPlatform()->CallOnBackgroundThread(
-        task, v8::Platform::kShortRunningTask);
+  if (!heap_->IsTearingDown() && FLAG_concurrent_array_buffer_freeing) {
+    V8::GetCurrentPlatform()->CallOnWorkerThread(
+        base::make_unique<FreeingTask>(heap_));
   } else {
     // Fallback for when concurrency is disabled/restricted.
     FreeAllocations();

@@ -4,9 +4,29 @@ const common = require('../common');
 const { Readable } = require('stream');
 const assert = require('assert');
 
-common.crashOnUnhandledRejection();
-
 async function tests() {
+  {
+    const AsyncIteratorPrototype = Object.getPrototypeOf(
+      Object.getPrototypeOf(async function* () {}).prototype);
+    const rs = new Readable({});
+    assert.strictEqual(
+      Object.getPrototypeOf(Object.getPrototypeOf(rs[Symbol.asyncIterator]())),
+      AsyncIteratorPrototype);
+  }
+
+  await (async function() {
+    const readable = new Readable({ objectMode: true, read() {} });
+    readable.push(0);
+    readable.push(1);
+    readable.push(null);
+
+    const iter = readable[Symbol.asyncIterator]();
+    assert.strictEqual((await iter.next()).value, 0);
+    for await (const d of iter) {
+      assert.strictEqual(d, 1);
+    }
+  })();
+
   await (async function() {
     console.log('read without for..await');
     const max = 5;
@@ -113,6 +133,18 @@ async function tests() {
     });
 
     readable.destroy(new Error('kaboom'));
+  })();
+
+  await (async function() {
+    console.log('call next() after error');
+    const readable = new Readable({
+      read() {}
+    });
+    const iterator = readable[Symbol.asyncIterator]();
+
+    const err = new Error('kaboom');
+    readable.destroy(new Error('kaboom'));
+    await assert.rejects(iterator.next.bind(iterator), err);
   })();
 
   await (async function() {

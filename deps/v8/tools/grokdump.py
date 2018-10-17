@@ -761,7 +761,7 @@ class MinidumpReader(object):
 
   def IsValidExceptionStackAddress(self, address):
     if not self.IsValidAddress(address): return False
-    return self.isExceptionStackAddress(address)
+    return self.IsExceptionStackAddress(address)
 
   def IsModuleAddress(self, address):
     return self.GetModuleForAddress(address) != None
@@ -1230,9 +1230,6 @@ class Map(HeapObject):
 
   def DependentCodeOffset(self):
     return self.CodeCacheOffset() + self.heap.PointerSize()
-
-  def WeakCellCacheOffset(self):
-    return self.DependentCodeOffset() + self.heap.PointerSize()
 
   def ReadByte(self, offset):
     return self.heap.reader.ReadU8(self.address + offset)
@@ -1732,6 +1729,8 @@ class V8Heap(object):
     "ODDBALL_TYPE": Oddball,
     "FIXED_ARRAY_TYPE": FixedArray,
     "HASH_TABLE_TYPE": FixedArray,
+    "OBJECT_BOILERPLATE_DESCRIPTION_TYPE": FixedArray,
+    "SCOPE_INFO_TYPE": FixedArray,
     "JS_FUNCTION_TYPE": JSFunction,
     "SHARED_FUNCTION_INFO_TYPE": SharedFunctionInfo,
     "SCRIPT_TYPE": Script,
@@ -2061,7 +2060,8 @@ class InspectionPadawan(object):
   def SenseMap(self, tagged_address):
     if self.IsInKnownMapSpace(tagged_address):
       offset = self.GetPageOffset(tagged_address)
-      known_map_info = KNOWN_MAPS.get(offset)
+      lookup_key = ("MAP_SPACE", offset)
+      known_map_info = KNOWN_MAPS.get(lookup_key)
       if known_map_info:
         known_map_type, known_map_name = known_map_info
         return KnownMap(self, known_map_name, known_map_type)
@@ -2161,6 +2161,7 @@ class InspectionPadawan(object):
     return None
 
   def TryExtractErrorMessage(self, slot, start, end, print_message):
+    ptr_size = self.reader.PointerSize()
     end_marker = ERROR_MESSAGE_MARKER + 1;
     header_size = 1
     end_search = start + 1024 + (header_size * ptr_size);
@@ -3319,7 +3320,7 @@ DUMP_FILE_RE = re.compile(r"[-_0-9a-zA-Z][-\._0-9a-zA-Z]*\.dmp$")
 class InspectionWebServer(BaseHTTPServer.HTTPServer):
   def __init__(self, port_number, switches, minidump_name):
     BaseHTTPServer.HTTPServer.__init__(
-        self, ('', port_number), InspectionWebHandler)
+        self, ('localhost', port_number), InspectionWebHandler)
     splitpath = os.path.split(minidump_name)
     self.dumppath = splitpath[0]
     self.dumpfilename = splitpath[1]

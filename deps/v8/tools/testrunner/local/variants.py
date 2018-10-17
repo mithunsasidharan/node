@@ -7,9 +7,10 @@ ALL_VARIANT_FLAGS = {
   "code_serializer": [["--cache=code"]],
   "default": [[]],
   "future": [["--future"]],
+  "gc_stats": [["--gc_stats=1"]],
   # Alias of exhaustive variants, but triggering new test framework features.
   "infra_staging": [[]],
-  "liftoff": [["--liftoff"]],
+  "no_liftoff": [["--no-wasm-tier-up"]],
   "minor_mc": [["--minor-mc"]],
   # No optimization means disable all optimizations. OptimizeFunctionOnNextCall
   # would not force optimization too. It turns into a Nop. Please see
@@ -17,13 +18,12 @@ ALL_VARIANT_FLAGS = {
   "nooptimization": [["--noopt"]],
   "slow_path": [["--force-slow-path"]],
   "stress": [["--stress-opt", "--always-opt"]],
-  "stress_background_compile": [["--background-compile", "--stress-background-compile"]],
+  "stress_background_compile": [["--stress-background-compile"]],
   "stress_incremental_marking":  [["--stress-incremental-marking"]],
   # Trigger stress sampling allocation profiler with sample interval = 2^14
   "stress_sampling": [["--stress-sampling-allocation-profiler=16384"]],
   "trusted": [["--no-untrusted-code-mitigations"]],
-  "wasm_traps": [["--wasm-trap-handler", "--invoke-weak-callbacks"]],
-  "wasm_no_native": [["--no-wasm-jit-to-native"]],
+  "no_wasm_traps": [["--no-wasm-trap-handler"]],
 }
 
 SLOW_VARIANTS = set([

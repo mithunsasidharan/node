@@ -5,8 +5,9 @@
 #if V8_TARGET_ARCH_IA32
 
 #include "src/codegen.h"
-#include "src/factory-inl.h"
+#include "src/heap/factory-inl.h"
 #include "src/heap/heap.h"
+#include "src/isolate.h"
 #include "src/macro-assembler.h"
 
 namespace v8 {
@@ -35,7 +36,7 @@ UnaryMathFunctionWithIsolate CreateSqrtFunction(Isolate* isolate) {
 
   CodeDesc desc;
   masm.GetCode(isolate, &desc);
-  DCHECK(!RelocInfo::RequiresRelocation(desc));
+  DCHECK(!RelocInfo::RequiresRelocationAfterCodegen(desc));
 
   Assembler::FlushICache(buffer, allocated);
   CHECK(SetPermissions(buffer, allocated, PageAllocator::kReadExecute));
@@ -447,7 +448,7 @@ MemMoveFunction CreateMemMoveFunction(Isolate* isolate) {
 
   CodeDesc desc;
   masm.GetCode(isolate, &desc);
-  DCHECK(!RelocInfo::RequiresRelocation(desc));
+  DCHECK(!RelocInfo::RequiresRelocationAfterCodegen(desc));
   Assembler::FlushICache(buffer, allocated);
   CHECK(SetPermissions(buffer, allocated, PageAllocator::kReadExecute));
   // TODO(jkummerow): It would be nice to register this code creation event

@@ -1,3 +1,4 @@
+// Flags: --expose-internals
 'use strict';
 
 const common = require('../common');
@@ -5,8 +6,9 @@ const assert = require('assert');
 const net = require('net');
 const fs = require('fs');
 const { getSystemErrorName } = require('util');
-const { TCP, constants: TCPConstants } = process.binding('tcp_wrap');
-const { Pipe, constants: PipeConstants } = process.binding('pipe_wrap');
+const { internalBinding } = require('internal/test/binding');
+const { TCP, constants: TCPConstants } = internalBinding('tcp_wrap');
+const { Pipe, constants: PipeConstants } = internalBinding('pipe_wrap');
 
 const tmpdir = require('../common/tmpdir');
 tmpdir.refresh();
@@ -148,7 +150,7 @@ if (!common.isWindows) {  // Windows doesn't support {fd: <n>}
   net.createServer()
     .listen({ fd }, common.mustNotCall())
     .on('error', common.mustCall(function(err) {
-      assert.strictEqual(String(err), 'Error: listen EINVAL');
+      assert.strictEqual(String(err), 'Error: listen EINVAL: invalid argument');
       this.close();
     }));
 }

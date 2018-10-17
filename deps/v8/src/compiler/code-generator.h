@@ -14,15 +14,12 @@
 #include "src/macro-assembler.h"
 #include "src/safepoint-table.h"
 #include "src/source-position-table.h"
+#include "src/trap-handler/trap-handler.h"
 
 namespace v8 {
 namespace internal {
 
-class CompilationInfo;
-
-namespace trap_handler {
-struct ProtectedInstructionData;
-}  // namespace trap_handler
+class OptimizedCompilationInfo;
 
 namespace compiler {
 
@@ -81,21 +78,24 @@ class DeoptimizationLiteral {
 class CodeGenerator final : public GapResolver::Assembler {
  public:
   explicit CodeGenerator(Zone* codegen_zone, Frame* frame, Linkage* linkage,
-                         InstructionSequence* code, CompilationInfo* info,
-                         Isolate* isolate, base::Optional<OsrHelper> osr_helper,
+                         InstructionSequence* code,
+                         OptimizedCompilationInfo* info, Isolate* isolate,
+                         base::Optional<OsrHelper> osr_helper,
                          int start_source_position,
                          JumpOptimizationInfo* jump_opt,
-                         std::vector<trap_handler::ProtectedInstructionData>*
-                             protected_instructions,
-                         LoadPoisoning load_poisoning);
+                         PoisoningMitigationLevel poisoning_level,
+                         const AssemblerOptions& options,
+                         int32_t builtin_index);
 
   // Generate native code. After calling AssembleCode, call FinalizeCode to
   // produce the actual code object. If an error occurs during either phase,
-  // FinalizeCode returns a null handle.
+  // FinalizeCode returns an empty MaybeHandle.
   void AssembleCode();  // Does not need to run on main thread.
-  Handle<Code> FinalizeCode();
+  MaybeHandle<Code> FinalizeCode();
 
-  Handle<ByteArray> GetSourcePositionTable();
+  OwnedVector<byte> GetSourcePositionTable();
+  OwnedVector<trap_handler::ProtectedInstructionData>
+  GetProtectedInstructions();
 
   InstructionSequence* code() const { return code_; }
   FrameAccessState* frame_access_state() const { return frame_access_state_; }
@@ -107,6 +107,8 @@ class CodeGenerator final : public GapResolver::Assembler {
 
   void AddProtectedInstructionLanding(uint32_t instr_offset,
                                       uint32_t landing_offset);
+
+  bool wasm_runtime_exception_support() const;
 
   SourcePosition start_source_position() const {
     return start_source_position_;
@@ -124,10 +126,15 @@ class CodeGenerator final : public GapResolver::Assembler {
   size_t GetSafepointTableOffset() const { return safepoints_.GetCodeOffset(); }
   size_t GetHandlerTableOffset() const { return handler_table_offset_; }
 
+  const ZoneVector<int>& block_starts() const { return block_starts_; }
+  const ZoneVector<int>& instr_starts() const { return instr_starts_; }
+
+  static constexpr int kBinarySearchSwitchMinimalCases = 4;
+
  private:
   GapResolver* resolver() { return &resolver_; }
   SafepointTableBuilder* safepoints() { return &safepoints_; }
-  CompilationInfo* info() const { return info_; }
+  OptimizedCompilationInfo* info() const { return info_; }
   OsrHelper* osr_helper() { return &(*osr_helper_); }
 
   // Create the FrameAccessState object. The Frame is immutable from here on.
@@ -155,10 +162,12 @@ class CodeGenerator final : public GapResolver::Assembler {
   // predecessor blocks ends with a masking branch.
   void TryInsertBranchPoisoning(const InstructionBlock* block);
 
-  // Initializes the masking register.
-  // Eventually, this should be always threaded through from the caller
-  // (in the proplogue) or from a callee (after a call).
-  void InitializePoisonForLoadsIfNeeded();
+  // Initializes the masking register in the prologue of a function.
+  void InitializeSpeculationPoison();
+  // Reset the masking register during execution of a function.
+  void ResetSpeculationPoison();
+  // Generates a mask from the pc passed in {kJavaScriptCallCodeStartRegister}.
+  void GenerateSpeculationPoisonFromCodeStartRegister();
 
   // Assemble code for the specified instruction.
   CodeGenResult AssembleInstruction(Instruction* instr,
@@ -174,6 +183,9 @@ class CodeGenerator final : public GapResolver::Assembler {
   // pointer before execution. The stack slot index to the empty slot above the
   // adjusted stack pointer is returned in |slot|.
   bool GetSlotAboveSPBeforeTailCall(Instruction* instr, int* slot);
+
+  // Determines how to call helper stubs depending on the code kind.
+  StubCallMode DetermineStubCallMode() const;
 
   CodeGenResult AssembleDeoptimizerCall(int deoptimization_id,
                                         SourcePosition pos);
@@ -191,6 +203,10 @@ class CodeGenerator final : public GapResolver::Assembler {
 
   void AssembleArchBoolean(Instruction* instr, FlagsCondition condition);
   void AssembleArchTrap(Instruction* instr, FlagsCondition condition);
+  void AssembleArchBinarySearchSwitchRange(Register input, RpoNumber def_block,
+                                           std::pair<int32_t, Label*>* begin,
+                                           std::pair<int32_t, Label*>* end);
+  void AssembleArchBinarySearchSwitch(Instruction* instr);
   void AssembleArchLookupSwitch(Instruction* instr);
   void AssembleArchTableSwitch(Instruction* instr);
 
@@ -205,10 +221,6 @@ class CodeGenerator final : public GapResolver::Assembler {
   // because this code has already been deoptimized and needs to be unlinked
   // from the JS functions referring it.
   void BailoutIfDeoptimized();
-
-  // Generates a mask which can be used to poison values when we detect
-  // the code is executing speculatively.
-  void GenerateSpeculationPoison();
 
   // Generates code to poison the stack pointer and implicit register arguments
   // like the context register and the function register.
@@ -380,7 +392,7 @@ class CodeGenerator final : public GapResolver::Assembler {
   Linkage* const linkage_;
   InstructionSequence* const code_;
   UnwindingInfoWriter unwinding_info_writer_;
-  CompilationInfo* const info_;
+  OptimizedCompilationInfo* const info_;
   Label* const labels_;
   Label return_label_;
   RpoNumber current_block_;
@@ -416,9 +428,11 @@ class CodeGenerator final : public GapResolver::Assembler {
   int osr_pc_offset_;
   int optimized_out_literal_id_;
   SourcePositionTableBuilder source_position_table_builder_;
-  std::vector<trap_handler::ProtectedInstructionData>* protected_instructions_;
+  ZoneVector<trap_handler::ProtectedInstructionData> protected_instructions_;
   CodeGenResult result_;
-  LoadPoisoning load_poisoning_;
+  PoisoningMitigationLevel poisoning_level_;
+  ZoneVector<int> block_starts_;
+  ZoneVector<int> instr_starts_;
 };
 
 }  // namespace compiler

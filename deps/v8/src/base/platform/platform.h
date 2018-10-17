@@ -48,7 +48,7 @@ namespace base {
 
 #define V8_FAST_TLS_SUPPORTED 1
 
-INLINE(intptr_t InternalGetExistingThreadLocal(intptr_t index));
+V8_INLINE intptr_t InternalGetExistingThreadLocal(intptr_t index);
 
 inline intptr_t InternalGetExistingThreadLocal(intptr_t index) {
   const intptr_t kTibInlineTlsOffset = 0xE10;
@@ -74,7 +74,7 @@ inline intptr_t InternalGetExistingThreadLocal(intptr_t index) {
 
 extern V8_BASE_EXPORT intptr_t kMacTlsBaseOffset;
 
-INLINE(intptr_t InternalGetExistingThreadLocal(intptr_t index));
+V8_INLINE intptr_t InternalGetExistingThreadLocal(intptr_t index);
 
 inline intptr_t InternalGetExistingThreadLocal(intptr_t index) {
   intptr_t result;
@@ -159,6 +159,7 @@ class V8_BASE_EXPORT OS {
   // v8::PageAllocator.
   enum class MemoryPermission {
     kNoAccess,
+    kRead,
     kReadWrite,
     // TODO(hpayer): Remove this flag. Memory should never be rwx.
     kReadWriteExecute,
@@ -245,6 +246,8 @@ class V8_BASE_EXPORT OS {
 
   static int GetCurrentThreadId();
 
+  static void ExitProcess(int exit_code);
+
  private:
   // These classes use the private memory management API below.
   friend class MemoryMappedFile;
@@ -278,6 +281,18 @@ class V8_BASE_EXPORT OS {
 
   DISALLOW_IMPLICIT_CONSTRUCTORS(OS);
 };
+
+#if (defined(_WIN32) || defined(_WIN64))
+V8_BASE_EXPORT void EnsureConsoleOutputWin32();
+#endif  // (defined(_WIN32) || defined(_WIN64))
+
+inline void EnsureConsoleOutput() {
+#if (defined(_WIN32) || defined(_WIN64))
+  // Windows requires extra calls to send assert output to the console
+  // rather than a dialog box.
+  EnsureConsoleOutputWin32();
+#endif  // (defined(_WIN32) || defined(_WIN64))
+}
 
 // ----------------------------------------------------------------------------
 // Thread

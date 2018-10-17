@@ -10,7 +10,7 @@ different options and ways to run scripts with Node.js.
 
 ## Example
 An example of a [web server][] written with Node.js which responds with
-`'Hello World!'`:
+`'Hello, World!'`:
 
 Commands displayed in this document are shown starting with `$` or `>`
 to replicate how they would appear in a user's terminal.
@@ -71,7 +71,7 @@ const port = 3000;
 const server = http.createServer((req, res) => {
   res.statusCode = 200;
   res.setHeader('Content-Type', 'text/plain');
-  res.end('Hello World!\n');
+  res.end('Hello, World!\n');
 });
 
 server.listen(port, hostname, () => {
@@ -88,13 +88,13 @@ $ node hello-world.js
 An output like this should appear in the terminal to indicate Node.js
 server is running:
 
- ```console
- Server running at http://127.0.0.1:3000/
- ````
+```console
+Server running at http://127.0.0.1:3000/
+```
 
 Now, open any preferred web browser and visit `http://127.0.0.1:3000`.
 
-If the browser displays the string `Hello, world!`, that indicates
+If the browser displays the string `Hello, World!`, that indicates
 the server is working.
 
 Many of the examples in the documentation can be run similarly.

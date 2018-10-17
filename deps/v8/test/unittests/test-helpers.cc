@@ -32,15 +32,22 @@ Handle<SharedFunctionInfo> CreateSharedFunctionInfo(
   HandleScope scope(isolate);
   Handle<String> source = CreateSource(isolate, maybe_resource);
   Handle<Script> script = isolate->factory()->NewScript(source);
-  Handle<FixedArray> infos = isolate->factory()->NewFixedArray(3);
+  Handle<WeakFixedArray> infos = isolate->factory()->NewWeakFixedArray(3);
   script->set_shared_function_infos(*infos);
-  Handle<SharedFunctionInfo> shared = isolate->factory()->NewSharedFunctionInfo(
-      isolate->factory()->NewStringFromAsciiChecked("f"),
-      BUILTIN_CODE(isolate, CompileLazy), false);
-  shared->set_end_position(source->length());
-  shared->set_outer_scope_info(ScopeInfo::Empty(isolate));
-  shared->set_function_literal_id(1);
-  SharedFunctionInfo::SetScript(shared, script);
+  Handle<SharedFunctionInfo> shared =
+      isolate->factory()->NewSharedFunctionInfoForBuiltin(
+          isolate->factory()->NewStringFromAsciiChecked("f"),
+          Builtins::kCompileLazy);
+  int function_literal_id = 1;
+  // Ensure that the function can be compiled lazily.
+  shared->set_uncompiled_data(
+      *isolate->factory()->NewUncompiledDataWithoutPreParsedScope(
+          ReadOnlyRoots(isolate).empty_string_handle(), 0, source->length(),
+          function_literal_id));
+  // Make sure we have an outer scope info, even though it's empty
+  shared->set_raw_outer_scope_info_or_feedback_metadata(
+      ScopeInfo::Empty(isolate));
+  SharedFunctionInfo::SetScript(shared, script, function_literal_id);
   return scope.CloseAndEscape(shared);
 }
 

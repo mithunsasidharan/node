@@ -562,7 +562,8 @@ bool RegExpMacroAssemblerS390::CheckSpecialCharacterClass(uc16 type,
         __ CmpP(current_character(), Operand('z'));
         BranchOrBacktrack(gt, on_no_match);
       }
-      ExternalReference map = ExternalReference::re_word_character_map();
+      ExternalReference map =
+          ExternalReference::re_word_character_map(isolate());
       __ mov(r2, Operand(map));
       __ LoadlB(r2, MemOperand(r2, current_character()));
       __ CmpLogicalP(r2, Operand::Zero());
@@ -576,7 +577,8 @@ bool RegExpMacroAssemblerS390::CheckSpecialCharacterClass(uc16 type,
         __ CmpLogicalP(current_character(), Operand('z'));
         __ bgt(&done);
       }
-      ExternalReference map = ExternalReference::re_word_character_map();
+      ExternalReference map =
+          ExternalReference::re_word_character_map(isolate());
       __ mov(r2, Operand(map));
       __ LoadlB(r2, MemOperand(r2, current_character()));
       __ CmpLogicalP(r2, Operand::Zero());
@@ -1087,9 +1089,9 @@ template <typename T>
 static T& frame_entry(Address re_frame, int frame_offset) {
   DCHECK_EQ(kPointerSize, sizeof(T));
 #ifdef V8_TARGET_ARCH_S390X
-  return reinterpret_cast<T&>(Memory::uint64_at(re_frame + frame_offset));
+  return reinterpret_cast<T&>(Memory<uint64_t>(re_frame + frame_offset));
 #else
-  return reinterpret_cast<T&>(Memory::uint32_at(re_frame + frame_offset));
+  return reinterpret_cast<T&>(Memory<uint32_t>(re_frame + frame_offset));
 #endif
 }
 

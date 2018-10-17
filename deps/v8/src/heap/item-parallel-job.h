@@ -49,17 +49,18 @@ class V8_EXPORT_PRIVATE ItemParallelJob {
     virtual ~Item() = default;
 
     // Marks an item as being finished.
-    void MarkFinished() { CHECK(state_.TrySetValue(kProcessing, kFinished)); }
+    void MarkFinished() { CHECK_EQ(kProcessing, state_.exchange(kFinished)); }
 
    private:
-    enum ProcessingState { kAvailable, kProcessing, kFinished };
+    enum ProcessingState : uintptr_t { kAvailable, kProcessing, kFinished };
 
     bool TryMarkingAsProcessing() {
-      return state_.TrySetValue(kAvailable, kProcessing);
+      ProcessingState available = kAvailable;
+      return state_.compare_exchange_strong(available, kProcessing);
     }
-    bool IsFinished() { return state_.Value() == kFinished; }
+    bool IsFinished() { return state_ == kFinished; }
 
-    base::AtomicValue<ProcessingState> state_{kAvailable};
+    std::atomic<ProcessingState> state_{kAvailable};
 
     friend class ItemParallelJob;
     friend class ItemParallelJob::Task;
@@ -126,7 +127,7 @@ class V8_EXPORT_PRIVATE ItemParallelJob {
   ~ItemParallelJob();
 
   // Adds a task to the job. Transfers ownership to the job.
-  void AddTask(Task* task) { tasks_.push_back(task); }
+  void AddTask(Task* task) { tasks_.push_back(std::unique_ptr<Task>(task)); }
 
   // Adds an item to the job. Transfers ownership to the job.
   void AddItem(Item* item) { items_.push_back(item); }
@@ -140,7 +141,7 @@ class V8_EXPORT_PRIVATE ItemParallelJob {
 
  private:
   std::vector<Item*> items_;
-  std::vector<Task*> tasks_;
+  std::vector<std::unique_ptr<Task>> tasks_;
   CancelableTaskManager* cancelable_task_manager_;
   base::Semaphore* pending_tasks_;
   DISALLOW_COPY_AND_ASSIGN(ItemParallelJob);

@@ -2,6 +2,8 @@
 const common = require('../common');
 if (process.config.variables.node_without_node_options)
   common.skip('missing NODE_OPTIONS support');
+if (!common.isMainThread)
+  common.skip('process.chdir is not available in Workers');
 
 // Test options specified by env variable.
 
@@ -27,7 +29,6 @@ disallow('--interactive');
 disallow('-i');
 disallow('--v8-options');
 disallow('--');
-disallow('--no_warnings'); // Node options don't allow '_' instead of '-'.
 
 function disallow(opt) {
   const env = Object.assign({}, process.env, { NODE_OPTIONS: opt });

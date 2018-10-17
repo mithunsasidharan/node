@@ -6,7 +6,10 @@ if (!common.hasCrypto)
 const assert = require('assert');
 const crypto = require('crypto');
 
-const { INT_MAX } = process.binding('constants').crypto;
+common.expectWarning(
+  'DeprecationWarning',
+  'Calling pbkdf2 or pbkdf2Sync with "digest" set to null is deprecated.',
+  'DEP0009');
 
 //
 // Test PBKDF2 with RFC 6070 test vectors (except #4)
@@ -66,12 +69,12 @@ assert.throws(
 );
 
 assert.throws(
-  () => crypto.pbkdf2Sync('password', 'salt', -1, 20, null),
+  () => crypto.pbkdf2Sync('password', 'salt', -1, 20, 'sha1'),
   {
     code: 'ERR_OUT_OF_RANGE',
     name: 'RangeError [ERR_OUT_OF_RANGE]',
     message: 'The value of "iterations" is out of range. ' +
-             'It must be a non-negative number. Received -1'
+             'It must be >= 0 && < 4294967296. Received -1'
   }
 );
 
@@ -87,7 +90,7 @@ assert.throws(
     });
 });
 
-[Infinity, -Infinity, NaN, -1, 4073741824, INT_MAX + 1].forEach((input) => {
+[Infinity, -Infinity, NaN].forEach((input) => {
   assert.throws(
     () => {
       crypto.pbkdf2('password', 'salt', 1, input, 'sha256',
@@ -96,7 +99,20 @@ assert.throws(
       code: 'ERR_OUT_OF_RANGE',
       name: 'RangeError [ERR_OUT_OF_RANGE]',
       message: 'The value of "keylen" is out of range. It ' +
-               `must be >= 0 && <= 2147483647. Received ${input}`
+               `must be an integer. Received ${input}`
+    });
+});
+
+[-1, 4294967297].forEach((input) => {
+  assert.throws(
+    () => {
+      crypto.pbkdf2('password', 'salt', 1, input, 'sha256',
+                    common.mustNotCall());
+    }, {
+      code: 'ERR_OUT_OF_RANGE',
+      name: 'RangeError [ERR_OUT_OF_RANGE]',
+      message: 'The value of "keylen" is out of range. It ' +
+               `must be >= 0 && < 4294967296. Received ${input}`
     });
 });
 
@@ -123,7 +139,8 @@ assert.throws(
   });
 
 [1, {}, [], true, undefined, null].forEach((input) => {
-  const msgPart2 = `Buffer, or TypedArray. Received type ${typeof input}`;
+  const msgPart2 = 'Buffer, TypedArray, or DataView.' +
+                   ` Received type ${typeof input}`;
   assert.throws(
     () => crypto.pbkdf2(input, 'salt', 8, 8, 'sha256', common.mustNotCall()),
     {

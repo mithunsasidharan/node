@@ -15,24 +15,27 @@ cd %~dp0
 set config=Release
 set target=Build
 set target_arch=x64
+set ltcg=
+set pch=1
 set target_env=
 set noprojgen=
+set projgen=
 set nobuild=
 set sign=
 set nosnapshot=
 set cctest_args=
 set test_args=
+set stage_package=
 set package=
 set msi=
 set upload=
 set licensertf=
 set lint_js=
 set lint_cpp=
-set build_testgc_addon=
+set lint_md=
+set lint_md_build=
 set noetw=
 set noetw_msi_arg=
-set noperfctr=
-set noperfctr_msi_arg=
 set i18n_arg=
 set download_arg=
 set build_release=
@@ -53,25 +56,28 @@ set nghttp2_debug=
 set link_module=
 set no_cctest=
 set openssl_no_asm=
+set doc=
 
 :next-arg
 if "%1"=="" goto args-done
 if /i "%1"=="debug"         set config=Debug&goto arg-ok
-if /i "%1"=="release"       set config=Release&goto arg-ok
+if /i "%1"=="release"       set config=Release&set ltcg=1&set "pch="&goto arg-ok
 if /i "%1"=="clean"         set target=Clean&goto arg-ok
 if /i "%1"=="ia32"          set target_arch=x86&goto arg-ok
 if /i "%1"=="x86"           set target_arch=x86&goto arg-ok
 if /i "%1"=="x64"           set target_arch=x64&goto arg-ok
 if /i "%1"=="vs2017"        set target_env=vs2017&goto arg-ok
 if /i "%1"=="noprojgen"     set noprojgen=1&goto arg-ok
+if /i "%1"=="projgen"       set projgen=1&goto arg-ok
 if /i "%1"=="nobuild"       set nobuild=1&goto arg-ok
 if /i "%1"=="nosign"        set "sign="&echo Note: vcbuild no longer signs by default. "nosign" is redundant.&goto arg-ok
 if /i "%1"=="sign"          set sign=1&goto arg-ok
 if /i "%1"=="nosnapshot"    set nosnapshot=1&goto arg-ok
 if /i "%1"=="noetw"         set noetw=1&goto arg-ok
-if /i "%1"=="noperfctr"     set noperfctr=1&goto arg-ok
+if /i "%1"=="ltcg"          set ltcg=1&goto arg-ok
+if /i "%1"=="nopch"         set "pch="&goto arg-ok
 if /i "%1"=="licensertf"    set licensertf=1&goto arg-ok
-if /i "%1"=="test"          set test_args=%test_args% -J %common_test_suites%&set lint_cpp=1&set lint_js=1&goto arg-ok
+if /i "%1"=="test"          set test_args=%test_args% -J %common_test_suites%&set lint_cpp=1&set lint_js=1&set lint_md=1&goto arg-ok
 if /i "%1"=="test-ci"       set test_args=%test_args% %test_ci_args% -p tap --logfile test.tap %common_test_suites%&set cctest_args=%cctest_args% --gtest_output=tap:cctest.tap&goto arg-ok
 if /i "%1"=="build-addons"   set build_addons=1&goto arg-ok
 if /i "%1"=="build-addons-napi"   set build_addons_napi=1&goto arg-ok
@@ -79,13 +85,12 @@ if /i "%1"=="test-addons"   set test_args=%test_args% addons&set build_addons=1&
 if /i "%1"=="test-addons-napi"   set test_args=%test_args% addons-napi&set build_addons_napi=1&goto arg-ok
 if /i "%1"=="test-simple"   set test_args=%test_args% sequential parallel -J&goto arg-ok
 if /i "%1"=="test-message"  set test_args=%test_args% message&goto arg-ok
-if /i "%1"=="test-gc"       set test_args=%test_args% gc&set build_testgc_addon=1&goto arg-ok
 if /i "%1"=="test-tick-processor" set test_args=%test_args% tick-processor&goto arg-ok
 if /i "%1"=="test-internet" set test_args=%test_args% internet&goto arg-ok
 if /i "%1"=="test-pummel"   set test_args=%test_args% pummel&goto arg-ok
 if /i "%1"=="test-known-issues" set test_args=%test_args% known_issues&goto arg-ok
 if /i "%1"=="test-async-hooks"  set test_args=%test_args% async-hooks&goto arg-ok
-if /i "%1"=="test-all"      set test_args=%test_args% gc internet pummel %common_test_suites%&set build_testgc_addon=1&set lint_cpp=1&set lint_js=1&goto arg-ok
+if /i "%1"=="test-all"      set test_args=%test_args% gc internet pummel %common_test_suites%&set lint_cpp=1&set lint_js=1&goto arg-ok
 if /i "%1"=="test-node-inspect" set test_node_inspect=1&goto arg-ok
 if /i "%1"=="test-check-deopts" set test_check_deopts=1&goto arg-ok
 if /i "%1"=="test-npm"      set test_npm=1&goto arg-ok
@@ -98,7 +103,9 @@ if /i "%1"=="lint-js"       set lint_js=1&goto arg-ok
 if /i "%1"=="jslint"        set lint_js=1&echo Please use lint-js instead of jslint&goto arg-ok
 if /i "%1"=="lint-js-ci"    set lint_js_ci=1&goto arg-ok
 if /i "%1"=="jslint-ci"     set lint_js_ci=1&echo Please use lint-js-ci instead of jslint-ci&goto arg-ok
-if /i "%1"=="lint"          set lint_cpp=1&set lint_js=1&goto arg-ok
+if /i "%1"=="lint-md"       set lint_md=1&goto arg-ok
+if /i "%1"=="lint-md-build" set lint_md_build=1&goto arg-ok
+if /i "%1"=="lint"          set lint_cpp=1&set lint_js=1&set lint_md=1&goto arg-ok
 if /i "%1"=="lint-ci"       set lint_cpp=1&set lint_js_ci=1&goto arg-ok
 if /i "%1"=="package"       set package=1&goto arg-ok
 if /i "%1"=="msi"           set msi=1&set licensertf=1&set download_arg="--download=all"&set i18n_arg=small-icu&goto arg-ok
@@ -114,11 +121,11 @@ if /i "%1"=="enable-vtune"  set enable_vtune_arg=1&goto arg-ok
 if /i "%1"=="dll"           set dll=1&goto arg-ok
 if /i "%1"=="static"           set enable_static=1&goto arg-ok
 if /i "%1"=="no-NODE-OPTIONS"	set no_NODE_OPTIONS=1&goto arg-ok
-if /i "%1"=="debug-http2"   set debug_http2=1&goto arg-ok
 if /i "%1"=="debug-nghttp2" set debug_nghttp2=1&goto arg-ok
 if /i "%1"=="link-module"   set "link_module= --link-module=%2%link_module%"&goto arg-ok-2
 if /i "%1"=="no-cctest"     set no_cctest=1&goto arg-ok
 if /i "%1"=="openssl-no-asm"   set openssl_no_asm=1&goto arg-ok
+if /i "%1"=="doc"           set doc=1&goto arg-ok
 
 echo Error: invalid command line option `%1`.
 exit /b 1
@@ -142,17 +149,25 @@ if defined build_release (
   set licensertf=1
   set download_arg="--download=all"
   set i18n_arg=small-icu
+  set projgen=1
+  set ltcg=1
+  set "pch="
 )
+
+if defined msi     set stage_package=1
+if defined package set stage_package=1
 
 :: assign path to node_exe
 set "node_exe=%config%\node.exe"
 set "node_gyp_exe="%node_exe%" deps\npm\node_modules\node-gyp\bin\node-gyp"
+set "npm_exe="%~dp0%node_exe%" %~dp0deps\npm\bin\npm-cli.js"
 if "%target_env%"=="vs2017" set "node_gyp_exe=%node_gyp_exe% --msvs_version=2017"
 
 if "%config%"=="Debug"      set configure_flags=%configure_flags% --debug
 if defined nosnapshot       set configure_flags=%configure_flags% --without-snapshot
 if defined noetw            set configure_flags=%configure_flags% --without-etw& set noetw_msi_arg=/p:NoETW=1
-if defined noperfctr        set configure_flags=%configure_flags% --without-perfctr& set noperfctr_msi_arg=/p:NoPerfCtr=1
+if defined ltcg             set configure_flags=%configure_flags% --with-ltcg
+if defined pch              set configure_flags=%configure_flags% --with-pch
 if defined release_urlbase  set configure_flags=%configure_flags% --release-urlbase=%release_urlbase%
 if defined download_arg     set configure_flags=%configure_flags% %download_arg%
 if defined enable_vtune_arg set configure_flags=%configure_flags% --enable-vtune-profiling
@@ -164,6 +179,7 @@ if defined i18n_arg         set configure_flags=%configure_flags% --with-intl=%i
 if defined config_flags     set configure_flags=%configure_flags% %config_flags%
 if defined target_arch      set configure_flags=%configure_flags% --dest-cpu=%target_arch%
 if defined openssl_no_asm   set configure_flags=%configure_flags% --openssl-no-asm
+if defined DEBUG_HELPER     set configure_flags=%configure_flags% --verbose
 
 if not exist "%~dp0deps\icu" goto no-depsicu
 if "%target%"=="Clean" echo deleting %~dp0deps\icu
@@ -180,7 +196,9 @@ call :getnodeversion || exit /b 1
 
 if defined TAG set configure_flags=%configure_flags% --tag=%TAG%
 
-if "%target%"=="Clean" rmdir /Q /S "%~dp0%config%\node-v%FULLVERSION%-win-%target_arch%" > nul 2> nul
+if not "%target%"=="Clean" goto skip-clean
+rmdir /Q /S "%~dp0%config%\node-v%FULLVERSION%-win-%target_arch%" > nul 2> nul
+:skip-clean
 
 if defined noprojgen if defined nobuild if not defined sign if not defined msi goto licensertf
 
@@ -193,6 +211,8 @@ if _%PROCESSOR_ARCHITEW6432%_==_AMD64_ set msvs_host_arch=amd64
 set vcvarsall_arg=%msvs_host_arch%_%target_arch%
 @rem unless both host and target are x64
 if %target_arch%==x64 if %msvs_host_arch%==amd64 set vcvarsall_arg=amd64
+@rem also if both are x86
+if %target_arch%==x86 if %msvs_host_arch%==x86 set vcvarsall_arg=x86
 
 @rem Look for Visual Studio 2017
 :vs-set-2017
@@ -236,20 +256,40 @@ goto exit
 
 :wix-not-found
 echo Build skipped. To generate installer, you need to install Wix.
-goto run
+goto install-doctools
 
 :msbuild-found
 
+set project_generated=
 :project-gen
 @rem Skip project generation if requested.
 if defined noprojgen goto msbuild
+if defined projgen goto run-configure
+if not exist node.sln goto run-configure
+if not exist .gyp_configure_stamp goto run-configure
+echo %configure_flags% > .tmp_gyp_configure_stamp
+where /R . /T *.gyp? >> .tmp_gyp_configure_stamp
+fc .gyp_configure_stamp .tmp_gyp_configure_stamp >NUL 2>&1
+if errorlevel 1 goto run-configure
 
+:skip-configure
+del .tmp_gyp_configure_stamp 2> NUL
+echo Reusing solution generated with %configure_flags%
+goto msbuild
+
+:run-configure
+del .tmp_gyp_configure_stamp 2> NUL
+del .gyp_configure_stamp 2> NUL
 @rem Generate the VS project.
 echo configure %configure_flags%
+echo %configure_flags%> .used_configure_flags
 python configure %configure_flags%
 if errorlevel 1 goto create-msvs-files-failed
 if not exist node.sln goto create-msvs-files-failed
+set project_generated=1
 echo Project files generated.
+echo %configure_flags% > .gyp_configure_stamp
+where /R . /T *.gyp? >> .gyp_configure_stamp
 
 :msbuild
 @rem Skip build if requested.
@@ -262,7 +302,10 @@ set "msbplatform=Win32"
 if "%target_arch%"=="x64" set "msbplatform=x64"
 if "%target%"=="Build" if defined no_cctest set target=node
 msbuild node.sln %msbcpu% /t:%target% /p:Configuration=%config% /p:Platform=%msbplatform% /clp:NoSummary;NoItemAndPropertyList;Verbosity=minimal /nologo
-if errorlevel 1 goto exit
+if errorlevel 1 (
+  if not defined project_generated echo Building Node with reused solution failed. To regenerate project files use "vcbuild projgen"
+  goto exit
+)
 if "%target%" == "Clean" goto exit
 
 :sign
@@ -274,15 +317,17 @@ if errorlevel 1 echo Failed to sign exe&goto exit
 
 :licensertf
 @rem Skip license.rtf generation if not requested.
-if not defined licensertf goto package
+if not defined licensertf goto stage_package
 
 %config%\node.exe tools\license2rtf.js < LICENSE > %config%\license.rtf
 if errorlevel 1 echo Failed to generate license.rtf&goto exit
 
-:package
-if not defined package goto msi
+:stage_package
+if not defined stage_package goto install-doctools
+
 echo Creating package...
 cd Release
+rmdir /S /Q node-v%FULLVERSION%-win-%target_arch% > nul 2> nul
 mkdir node-v%FULLVERSION%-win-%target_arch% > nul 2> nul
 mkdir node-v%FULLVERSION%-win-%target_arch%\node_modules > nul 2>nul
 
@@ -294,7 +339,7 @@ copy /Y ..\README.md node-v%FULLVERSION%-win-%target_arch%\ > nul
 if errorlevel 1 echo Cannot copy README.md && goto package_error
 copy /Y ..\CHANGELOG.md node-v%FULLVERSION%-win-%target_arch%\ > nul
 if errorlevel 1 echo Cannot copy CHANGELOG.md && goto package_error
-robocopy /e ..\deps\npm node-v%FULLVERSION%-win-%target_arch%\node_modules\npm > nul
+robocopy ..\deps\npm node-v%FULLVERSION%-win-%target_arch%\node_modules\npm /e /xd test > nul
 if errorlevel 8 echo Cannot copy npm package && goto package_error
 copy /Y ..\deps\npm\bin\npm node-v%FULLVERSION%-win-%target_arch%\ > nul
 if errorlevel 1 echo Cannot copy npm && goto package_error
@@ -310,11 +355,11 @@ if not defined noetw (
     copy /Y ..\src\res\node_etw_provider.man node-v%FULLVERSION%-win-%target_arch%\ > nul
     if errorlevel 1 echo Cannot copy node_etw_provider.man && goto package_error
 )
-if not defined noperfctr (
-    copy /Y ..\src\res\node_perfctr_provider.man node-v%FULLVERSION%-win-%target_arch%\ > nul
-    if errorlevel 1 echo Cannot copy node_perfctr_provider.man && goto package_error
-)
+cd ..
 
+:package
+if not defined package goto msi
+cd Release
 echo Creating node-v%FULLVERSION%-win-%target_arch%.7z
 del node-v%FULLVERSION%-win-%target_arch%.7z > nul 2> nul
 7z a -r -mx9 -t7z node-v%FULLVERSION%-win-%target_arch%.7z node-v%FULLVERSION%-win-%target_arch% > nul
@@ -343,13 +388,13 @@ exit /b 1
 
 :msi
 @rem Skip msi generation if not requested
-if not defined msi goto run
+if not defined msi goto install-doctools
 
 :msibuild
 echo Building node-v%FULLVERSION%-%target_arch%.msi
 set "msbsdk="
 if defined WindowsSDKVersion set "msbsdk=/p:WindowsTargetPlatformVersion=%WindowsSDKVersion:~0,-1%"
-msbuild "%~dp0tools\msvs\msi\nodemsi.sln" /m /t:Clean,Build %msbsdk% /p:PlatformToolset=%PLATFORM_TOOLSET% /p:GypMsvsVersion=%GYP_MSVS_VERSION% /p:Configuration=%config% /p:Platform=%target_arch% /p:NodeVersion=%NODE_VERSION% /p:FullVersion=%FULLVERSION% /p:DistTypeDir=%DISTTYPEDIR% %noetw_msi_arg% %noperfctr_msi_arg% /clp:NoSummary;NoItemAndPropertyList;Verbosity=minimal /nologo
+msbuild "%~dp0tools\msvs\msi\nodemsi.sln" /m /t:Clean,Build %msbsdk% /p:PlatformToolset=%PLATFORM_TOOLSET% /p:GypMsvsVersion=%GYP_MSVS_VERSION% /p:Configuration=%config% /p:Platform=%target_arch% /p:NodeVersion=%NODE_VERSION% /p:FullVersion=%FULLVERSION% /p:DistTypeDir=%DISTTYPEDIR% %noetw_msi_arg% /clp:NoSummary;NoItemAndPropertyList;Verbosity=minimal /nologo
 if errorlevel 1 goto exit
 
 if not defined sign goto upload
@@ -358,7 +403,7 @@ if errorlevel 1 echo Failed to sign msi&goto exit
 
 :upload
 @rem Skip upload if not requested
-if not defined upload goto run
+if not defined upload goto install-doctools
 
 if not defined SSHCONFIG (
   echo SSHCONFIG is not set for upload
@@ -386,20 +431,41 @@ ssh -F %SSHCONFIG% %STAGINGSERVER% "touch nodejs/%DISTTYPEDIR%/v%FULLVERSION%/no
 if errorlevel 1 goto exit
 
 
+:install-doctools
+REM only install if building doc OR testing doctool
+if not defined doc (
+  echo.%test_args% | findstr doctool 1>nul
+  if errorlevel 1 goto :skip-install-doctools
+)
+if exist "tools\doc\node_modules\unified\package.json" goto skip-install-doctools
+SETLOCAL
+cd tools\doc
+%npm_exe% ci
+cd ..\..
+if errorlevel 1 goto exit
+ENDLOCAL
+:skip-install-doctools
+@rem Clear errorlevel from echo.%test_args% | findstr doctool 1>nul
+cd .
+
+:build-doc
+@rem Build documentation if requested
+if not defined doc goto run
+if not exist %node_exe% (
+  echo Failed to find node.exe
+  goto run
+)
+mkdir %config%\doc
+robocopy /e doc\api %config%\doc\api
+robocopy /e doc\api_assets %config%\doc\api\assets
+
+for %%F in (%config%\doc\api\*.md) do (
+  %node_exe% tools\doc\generate.js --node-version=v%FULLVERSION% %%F --output-directory=%%~dF%%~pF
+)
+
 :run
 @rem Run tests if requested.
 
-@rem Build test/gc add-on if required.
-if "%build_testgc_addon%"=="" goto build-addons
-%node_gyp_exe% rebuild --directory="%~dp0test\gc" --nodedir="%~dp0."
-if errorlevel 1 goto build-testgc-addon-failed
-goto build-addons
-
-:build-testgc-addon-failed
-echo Failed to build test/gc add-on."
-goto exit
-
-:build-addons
 if not defined build_addons goto build-addons-napi
 if not exist "%node_exe%" (
   echo Failed to find node.exe
@@ -414,13 +480,11 @@ for /d %%F in (test\addons\??_*) do (
 "%node_exe%" tools\doc\addon-verify.js
 if %errorlevel% neq 0 exit /b %errorlevel%
 :: building addons
-setlocal EnableDelayedExpansion
-for /d %%F in (test\addons\*) do (
-  %node_gyp_exe% rebuild ^
-    --directory="%%F" ^
-    --nodedir="%cd%"
-  if !errorlevel! neq 0 exit /b !errorlevel!
-)
+setlocal
+set npm_config_nodedir=%~dp0
+"%node_exe%" "%~dp0tools\build-addons.js" "%~dp0deps\npm\node_modules\node-gyp\bin\node-gyp.js" "%~dp0test\addons"
+if errorlevel 1 exit /b 1
+endlocal
 
 :build-addons-napi
 if not defined build_addons_napi goto run-tests
@@ -434,11 +498,10 @@ for /d %%F in (test\addons-napi\??_*) do (
   rd /s /q %%F
 )
 :: building addons-napi
-for /d %%F in (test\addons-napi\*) do (
-  %node_gyp_exe% rebuild ^
-    --directory="%%F" ^
-    --nodedir="%cd%"
-)
+setlocal
+set npm_config_nodedir=%~dp0
+"%node_exe%" "%~dp0tools\build-addons.js" "%~dp0deps\npm\node_modules\node-gyp\bin\node-gyp.js" "%~dp0test\addons-napi"
+if errorlevel 1 exit /b 1
 endlocal
 goto run-tests
 
@@ -469,6 +532,7 @@ if "%test_args%"=="" goto test-v8
 if "%config%"=="Debug" set test_args=--mode=debug %test_args%
 if "%config%"=="Release" set test_args=--mode=release %test_args%
 if defined no_cctest echo Skipping cctest because no-cctest was specified && goto run-test-py
+if not exist %config%\cctest.exe goto run-test-py
 echo running 'cctest %cctest_args%'
 "%config%\cctest" %cctest_args%
 :run-test-py
@@ -484,7 +548,7 @@ goto lint-cpp
 
 :lint-cpp
 if not defined lint_cpp goto lint-js
-call :run-lint-cpp src\*.c src\*.cc src\*.h test\addons\*.cc test\addons\*.h test\addons-napi\*.cc test\addons-napi\*.h test\cctest\*.cc test\cctest\*.h test\gc\binding.cc tools\icu\*.cc tools\icu\*.h
+call :run-lint-cpp src\*.c src\*.cc src\*.h test\addons\*.cc test\addons\*.h test\addons-napi\*.cc test\addons-napi\*.h test\cctest\*.cc test\cctest\*.h tools\icu\*.cc tools\icu\*.h
 python tools/check-imports.py
 goto lint-js
 
@@ -529,28 +593,48 @@ goto exit
 
 :lint-js
 if defined lint_js_ci goto lint-js-ci
-if not defined lint_js goto exit
+if not defined lint_js goto lint-md-build
 if not exist tools\node_modules\eslint goto no-lint
 echo running lint-js
 %config%\node tools\node_modules\eslint\bin\eslint.js --cache --rule "linebreak-style: 0" --ext=.js,.mjs,.md .eslintrc.js benchmark doc lib test tools
-goto exit
+goto lint-md-build
 
 :lint-js-ci
 echo running lint-js-ci
 %config%\node tools\lint-js.js -J -f tap -o test-eslint.tap benchmark doc lib test tools
-goto exit
+goto lint-md-build
 
 :no-lint
 echo Linting is not available through the source tarball.
 echo Use the git repo instead: $ git clone https://github.com/nodejs/node.git
+goto lint-md-build
+
+:lint-md-build
+if not defined lint_md_build goto lint-md
+echo "Deprecated no-op target 'lint_md_build'"
+goto lint-md
+
+:lint-md
+if not defined lint_md goto exit
+echo Running Markdown linter on docs...
+SETLOCAL ENABLEDELAYEDEXPANSION
+set lint_md_files=
+for /D %%D IN (doc\*) do (
+  for %%F IN (%%D\*.md) do (
+    set "lint_md_files="%%F" !lint_md_files!"
+  )
+)
+%config%\node tools\lint-md.js -q -f %lint_md_files%
+ENDLOCAL
 goto exit
 
 :create-msvs-files-failed
 echo Failed to create vc project files.
+del .used_configure_flags
 goto exit
 
 :help
-echo vcbuild.bat [debug/release] [msi] [test/test-ci/test-all/test-addons/test-addons-napi/test-internet/test-pummel/test-simple/test-message/test-gc/test-tick-processor/test-known-issues/test-node-inspect/test-check-deopts/test-npm/test-async-hooks/test-v8/test-v8-intl/test-v8-benchmarks/test-v8-all] [ignore-flaky] [static/dll] [noprojgen] [small-icu/full-icu/without-intl] [nobuild] [nosnapshot] [noetw] [noperfctr] [licensetf] [sign] [ia32/x86/x64] [vs2017] [download-all] [enable-vtune] [lint/lint-ci/lint-js/lint-js-ci] [package] [build-release] [upload] [no-NODE-OPTIONS] [link-module path-to-module] [debug-http2] [debug-nghttp2] [clean] [no-cctest] [openssl-no-asm]
+echo vcbuild.bat [debug/release] [msi] [doc] [test/test-ci/test-all/test-addons/test-addons-napi/test-internet/test-pummel/test-simple/test-message/test-tick-processor/test-known-issues/test-node-inspect/test-check-deopts/test-npm/test-async-hooks/test-v8/test-v8-intl/test-v8-benchmarks/test-v8-all] [ignore-flaky] [static/dll] [noprojgen] [projgen] [small-icu/full-icu/without-intl] [nobuild] [nosnapshot] [noetw] [ltcg] [nopch] [licensetf] [sign] [ia32/x86/x64] [vs2017] [download-all] [enable-vtune] [lint/lint-ci/lint-js/lint-js-ci/lint-md] [lint-md-build] [package] [build-release] [upload] [no-NODE-OPTIONS] [link-module path-to-module] [debug-http2] [debug-nghttp2] [clean] [no-cctest] [openssl-no-asm]
 echo Examples:
 echo   vcbuild.bat                          : builds release build
 echo   vcbuild.bat debug                    : builds debug build
@@ -559,7 +643,7 @@ echo   vcbuild.bat test                     : builds debug build and runs tests
 echo   vcbuild.bat build-release            : builds the release distribution as used by nodejs.org
 echo   vcbuild.bat enable-vtune             : builds nodejs with Intel VTune profiling support to profile JavaScript
 echo   vcbuild.bat link-module my_module.js : bundles my_module as built-in module
-echo   vcbuild.bat lint                     : runs the C++ and JavaScript linter
+echo   vcbuild.bat lint                     : runs the C++, documentation and JavaScript linter
 echo   vcbuild.bat no-cctest                : skip building cctest.exe
 goto exit
 

@@ -342,7 +342,7 @@ static Local<Value> GetStdout(Isolate* isolate, int child_fd,
       Local<String> addition =
           String::NewFromUtf8(isolate, buffer, NewStringType::kNormal, length)
               .ToLocalChecked();
-      accumulator = String::Concat(accumulator, addition);
+      accumulator = String::Concat(isolate, accumulator, addition);
       fullness = bytes_read + fullness - length;
       memcpy(buffer, buffer + length, fullness);
     }
@@ -872,14 +872,6 @@ void Shell::AddOSMethods(Isolate* isolate, Local<ObjectTemplate> os_templ) {
   os_templ->Set(String::NewFromUtf8(isolate, "rmdir", NewStringType::kNormal)
                     .ToLocalChecked(),
                 FunctionTemplate::New(isolate, RemoveDirectory));
-}
-
-void Shell::Exit(int exit_code) {
-  // Use _exit instead of exit to avoid races between isolate
-  // threads and static destructors.
-  fflush(stdout);
-  fflush(stderr);
-  _exit(exit_code);
 }
 
 }  // namespace v8

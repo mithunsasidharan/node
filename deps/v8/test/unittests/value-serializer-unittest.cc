@@ -8,7 +8,7 @@
 #include <string>
 
 #include "include/v8.h"
-#include "src/api.h"
+#include "src/api-inl.h"
 #include "src/base/build_config.h"
 #include "src/objects-inl.h"
 #include "src/wasm/wasm-objects.h"
@@ -81,7 +81,6 @@ class ValueSerializerTest : public TestWithIsolate {
   // Overridden in more specific fixtures.
   virtual ValueSerializer::Delegate* GetSerializerDelegate() { return nullptr; }
   virtual void BeforeEncode(ValueSerializer*) {}
-  virtual void AfterEncode() {}
   virtual ValueDeserializer::Delegate* GetDeserializerDelegate() {
     return nullptr;
   }
@@ -118,7 +117,6 @@ class ValueSerializerTest : public TestWithIsolate {
     if (!serializer.WriteValue(context, value).FromMaybe(false)) {
       return Nothing<std::vector<uint8_t>>();
     }
-    AfterEncode();
     std::pair<uint8_t*, size_t> buffer = serializer.Release();
     std::vector<uint8_t> result(buffer.first, buffer.first + buffer.second);
     free(buffer.first);
@@ -385,6 +383,72 @@ TEST_F(ValueSerializerTest, DecodeNumber) {
   EXPECT_TRUE(std::isnan(Number::Cast(*value)->Value()));
 #endif
   // TODO(jbroman): Equivalent test for big-endian machines.
+}
+
+TEST_F(ValueSerializerTest, RoundTripBigInt) {
+  Local<Value> value = RoundTripTest(BigInt::New(isolate(), -42));
+  ASSERT_TRUE(value->IsBigInt());
+  ExpectScriptTrue("result === -42n");
+
+  value = RoundTripTest(BigInt::New(isolate(), 42));
+  ExpectScriptTrue("result === 42n");
+
+  value = RoundTripTest(BigInt::New(isolate(), 0));
+  ExpectScriptTrue("result === 0n");
+
+  value = RoundTripTest("0x1234567890abcdef777888999n");
+  ExpectScriptTrue("result === 0x1234567890abcdef777888999n");
+
+  value = RoundTripTest("-0x1234567890abcdef777888999123n");
+  ExpectScriptTrue("result === -0x1234567890abcdef777888999123n");
+
+  Context::Scope scope(serialization_context());
+  value = RoundTripTest(BigIntObject::New(isolate(), 23));
+  ASSERT_TRUE(value->IsBigIntObject());
+  ExpectScriptTrue("result == 23n");
+}
+
+TEST_F(ValueSerializerTest, DecodeBigInt) {
+  Local<Value> value = DecodeTest({
+      0xFF, 0x0D,              // Version 13
+      0x5A,                    // BigInt
+      0x08,                    // Bitfield: sign = false, bytelength = 4
+      0x2A, 0x00, 0x00, 0x00,  // Digit: 42
+  });
+  ASSERT_TRUE(value->IsBigInt());
+  ExpectScriptTrue("result === 42n");
+
+  value = DecodeTest({
+      0xFF, 0x0D,  // Version 13
+      0x7A,        // BigIntObject
+      0x11,        // Bitfield: sign = true, bytelength = 8
+      0x2A, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00  // Digit: 42
+  });
+  ASSERT_TRUE(value->IsBigIntObject());
+  ExpectScriptTrue("result == -42n");
+
+  value = DecodeTest({
+      0xFF, 0x0D,  // Version 13
+      0x5A,        // BigInt
+      0x10,        // Bitfield: sign = false, bytelength = 8
+      0xEF, 0xCD, 0xAB, 0x90, 0x78, 0x56, 0x34, 0x12  // Digit(s).
+  });
+  ExpectScriptTrue("result === 0x1234567890abcdefn");
+
+  value = DecodeTest({0xFF, 0x0D,  // Version 13
+                      0x5A,        // BigInt
+                      0x17,        // Bitfield: sign = true, bytelength = 11
+                      0xEF, 0xCD, 0xAB, 0x90,  // Digits.
+                      0x78, 0x56, 0x34, 0x12, 0x33, 0x44, 0x55});
+  ExpectScriptTrue("result === -0x5544331234567890abcdefn");
+
+  value = DecodeTest({
+      0xFF, 0x0D,  // Version 13
+      0x5A,        // BigInt
+      0x02,        // Bitfield: sign = false, bytelength = 1
+      0x2A,        // Digit: 42
+  });
+  ExpectScriptTrue("result === 42n");
 }
 
 // String constants (in UTF-8) used for string encoding tests.
@@ -1586,8 +1650,6 @@ class ValueSerializerTestWithArrayBufferTransfer : public ValueSerializerTest {
     serializer->TransferArrayBuffer(0, input_buffer_);
   }
 
-  void AfterEncode() override { input_buffer_->Neuter(); }
-
   void BeforeDecode(ValueDeserializer* deserializer) override {
     deserializer->TransferArrayBuffer(0, output_buffer_);
   }
@@ -1627,12 +1689,12 @@ TEST_F(ValueSerializerTest, RoundTripTypedArray) {
   // Check that the right type comes out the other side for every kind of typed
   // array.
   Local<Value> value;
-#define TYPED_ARRAY_ROUND_TRIP_TEST(Type, type, TYPE, ctype, size) \
-  value = RoundTripTest("new " #Type "Array(2)");                  \
-  ASSERT_TRUE(value->Is##Type##Array());                           \
-  EXPECT_EQ(2u * size, TypedArray::Cast(*value)->ByteLength());    \
-  EXPECT_EQ(2u, TypedArray::Cast(*value)->Length());               \
-  ExpectScriptTrue("Object.getPrototypeOf(result) === " #Type      \
+#define TYPED_ARRAY_ROUND_TRIP_TEST(Type, type, TYPE, ctype)             \
+  value = RoundTripTest("new " #Type "Array(2)");                        \
+  ASSERT_TRUE(value->Is##Type##Array());                                 \
+  EXPECT_EQ(2u * sizeof(ctype), TypedArray::Cast(*value)->ByteLength()); \
+  EXPECT_EQ(2u, TypedArray::Cast(*value)->Length());                     \
+  ExpectScriptTrue("Object.getPrototypeOf(result) === " #Type            \
                    "Array.prototype");
 
   TYPED_ARRAYS(TYPED_ARRAY_ROUND_TRIP_TEST)
@@ -2452,7 +2514,8 @@ TEST_F(ValueSerializerTestWithWasm, DefaultSerializationDelegate) {
   Local<Message> message = InvalidEncodeTest(MakeWasm());
   size_t msg_len = static_cast<size_t>(message->Get()->Length());
   std::unique_ptr<char[]> buff(new char[msg_len + 1]);
-  message->Get()->WriteOneByte(reinterpret_cast<uint8_t*>(buff.get()));
+  message->Get()->WriteOneByte(isolate(),
+                               reinterpret_cast<uint8_t*>(buff.get()));
   // the message ends with the custom error string
   size_t custom_msg_len = strlen(kUnsupportedSerialization);
   ASSERT_GE(msg_len, custom_msg_len);

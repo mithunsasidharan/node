@@ -39,11 +39,11 @@
 .Op Ar options
 .Op Ar v8-options
 .Op Fl e Ar string | Ar script.js | Fl
-.Op Fl \-
+.Op Fl -
 .Op Ar arguments ...
 .
 .Nm node
-.Cm debug
+.Cm inspect
 .Op Fl e Ar string | Ar script.js | Fl | Ar <host>:<port>
 .Ar ...
 .
@@ -61,11 +61,11 @@ without arguments to start a REPL.
 .
 .Sh OPTIONS
 .Bl -tag -width 6n
-.It Sy \-
+.It Sy -
 Alias for stdin, analogous to the use of - in other command-line utilities.
 The executed script is read from stdin, and remaining arguments are passed to the script.
 .
-.It Fl \-
+.It Fl -
 Indicate the end of node options.
 Pass the rest of the arguments to the script.
 .Pp
@@ -75,21 +75,27 @@ the next argument will be used as a script filename.
 .It Fl -abort-on-uncaught-exception
 Aborting instead of exiting causes a core file to be generated for analysis.
 .
+.It Fl -completion-bash
+Print source-able bash completion script for Node.js.
+.
 .It Fl -enable-fips
 Enable FIPS-compliant crypto at startup.
 Requires Node.js to be built with
 .Sy ./configure --openssl-fips .
 .
-.It Fl \-experimental-modules
+.It Fl -experimental-modules
 Enable experimental ES module support and caching modules.
 .
-.It Fl \-experimental-repl-await
+.It Fl -experimental-repl-await
 Enable experimental top-level
 .Sy await
 keyword support in REPL.
 .
-.It Fl \-experimental-vm-modules
+.It Fl -experimental-vm-modules
 Enable experimental ES module support in VM module.
+.
+.It Fl -experimental-worker
+Enable experimental worker threads using worker_threads module.
 .
 .It Fl -force-fips
 Force FIPS-compliant crypto on startup
@@ -121,9 +127,15 @@ Default is
 V8 Inspector integration allows attaching Chrome DevTools and IDEs to Node.js instances for debugging and profiling.
 It uses the Chrome DevTools Protocol.
 .
+.It Fl -loader Ns = Ns Ar file
+Specify the
+.Ar file
+as a custom loader, to load
+.Fl -experimental-modules .
+.
 .It Fl -napi-modules
-Enable loading native modules compiled with the ABI-stable Node.js API (N-API)
-(experimental).
+This option is a no-op.
+It is kept for compatibility.
 .
 .It Fl -no-deprecation
 Silence deprecation warnings.
@@ -144,7 +156,13 @@ Among other uses, this can be used to enable FIPS-compliant crypto if Node.js is
 Emit pending deprecation warnings.
 .
 .It Fl -preserve-symlinks
-Instructs the module loader to preserve symbolic links when resolving and caching modules.
+Instructs the module loader to preserve symbolic links when resolving and caching modules other than the main module.
+.
+.It Fl -preserve-symlinks-main
+Instructs the module loader to preserve symbolic links when resolving and caching the main module.
+.
+.It Fl -prof
+Generate V8 profiler output.
 .
 .It Fl -prof-process
 Process V8 profiler output generated using the V8 option
@@ -157,6 +175,9 @@ instead of printing to stderr.
 .
 .It Fl -throw-deprecation
 Throw errors for deprecations.
+.
+.It Fl -title Ns = Ns Ar title
+Specify process.title on startup.
 .
 .It Fl -tls-cipher-list Ns = Ns Ar list
 Specify an alternative default TLS cipher list.
@@ -171,7 +192,10 @@ A comma-separated list of categories that should be traced when trace event trac
 .
 .It Fl -trace-event-file-pattern Ar pattern
 Template string specifying the filepath for the trace event data, it
-supports \fB${rotation}\fR and \fB${pid}\fR.
+supports
+.Sy ${rotation}
+and
+.Sy ${pid} .
 .
 .It Fl -trace-events-enabled
 Enable the collection of trace event tracing information.
@@ -185,7 +209,7 @@ Print stack traces for process warnings (including deprecations).
 .It Fl -track-heap-objects
 Track heap object allocations for heap snapshots.
 .
-.It Fl -use-bundled\-ca, Fl -use-openssl-ca
+.It Fl -use-bundled-ca , Fl -use-openssl-ca
 Use bundled Mozilla CA store as supplied by current Node.js version or use OpenSSL's default CA store.
 The default store is selectable at build-time.
 .Pp
@@ -204,7 +228,10 @@ and
 .It Fl -v8-options
 Print V8 command-line options.
 .Pp
-Note: V8 options allow words to be separated by both dashes (\fB-\fR) or underscores (\fB_\fR).
+Note: V8 options allow words to be separated by both dashes
+.Sy ( - )
+or underscores
+.Sy ( _ ) .
 .Pp
 For example,
 .Fl -stack-trace-limit
@@ -385,4 +412,3 @@ IRC (Node.js core development):
 .Sh AUTHORS
 Written and maintained by 1000+ contributors:
 .Sy https://github.com/nodejs/node/blob/master/AUTHORS
-.

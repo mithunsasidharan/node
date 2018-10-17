@@ -1,18 +1,42 @@
+// Flags: --expose-internals
 'use strict';
 const common = require('../common');
 const assert = require('assert');
-const cares = process.binding('cares_wrap');
+const { internalBinding } = require('internal/test/binding');
+const cares = internalBinding('cares_wrap');
 const dns = require('dns');
+const dnsPromises = dns.promises;
 
 // Stub `getaddrinfo` to *always* error.
-cares.getaddrinfo = () => process.binding('uv').UV_ENOENT;
+cares.getaddrinfo = () => internalBinding('uv').UV_ENOENT;
 
-common.expectsError(() => {
-  dns.lookup(1, {});
-}, {
-  code: 'ERR_INVALID_ARG_TYPE',
-  type: TypeError,
-  message: /^The "hostname" argument must be one of type string or falsy/
+{
+  const err = {
+    code: 'ERR_INVALID_ARG_TYPE',
+    type: TypeError,
+    message: /^The "hostname" argument must be of type string\. Received type number/
+  };
+
+  common.expectsError(() => dns.lookup(1, {}), err);
+  common.expectsError(() => dnsPromises.lookup(1, {}), err);
+}
+
+common.expectWarning({
+  // For 'internal/test/binding' module.
+  'internal/test/binding': [
+    'These APIs are exposed only for testing and are not ' +
+    'tracked by any versioning system or deprecation process.'
+  ],
+  // For dns.promises.
+  'ExperimentalWarning': [
+    'The dns.promises API is experimental'
+  ],
+  // For calling `dns.lookup` with falsy `hostname`.
+  'DeprecationWarning': [
+    'The provided hostname "false" is not a valid ' +
+    'hostname, and is supported in the dns module solely for compatibility.',
+    'DEP0118',
+  ],
 });
 
 common.expectsError(() => {
@@ -29,29 +53,66 @@ common.expectsError(() => {
   type: TypeError
 });
 
-common.expectsError(() => {
-  dns.lookup(false, {
+{
+  const err = {
+    code: 'ERR_INVALID_OPT_VALUE',
+    type: TypeError,
+    message: 'The value "100" is invalid for option "hints"'
+  };
+  const options = {
     hints: 100,
     family: 0,
     all: false
-  }, common.mustNotCall());
-}, {
-  code: 'ERR_INVALID_OPT_VALUE',
-  type: TypeError,
-  message: 'The value "100" is invalid for option "hints"'
-});
+  };
 
-common.expectsError(() => {
-  dns.lookup(false, {
+  common.expectsError(() => { dnsPromises.lookup(false, options); }, err);
+  common.expectsError(() => {
+    dns.lookup(false, options, common.mustNotCall());
+  }, err);
+}
+
+{
+  const err = {
+    code: 'ERR_INVALID_OPT_VALUE',
+    type: TypeError,
+    message: 'The value "20" is invalid for option "family"'
+  };
+  const options = {
     hints: 0,
     family: 20,
     all: false
-  }, common.mustNotCall());
-}, {
-  code: 'ERR_INVALID_OPT_VALUE',
-  type: TypeError,
-  message: 'The value "20" is invalid for option "family"'
-});
+  };
+
+  common.expectsError(() => { dnsPromises.lookup(false, options); }, err);
+  common.expectsError(() => {
+    dns.lookup(false, options, common.mustNotCall());
+  }, err);
+}
+
+(async function() {
+  let res;
+
+  res = await dnsPromises.lookup(false, {
+    hints: 0,
+    family: 0,
+    all: true
+  });
+  assert.deepStrictEqual(res, []);
+
+  res = await dnsPromises.lookup('127.0.0.1', {
+    hints: 0,
+    family: 4,
+    all: true
+  });
+  assert.deepStrictEqual(res, [{ address: '127.0.0.1', family: 4 }]);
+
+  res = await dnsPromises.lookup('127.0.0.1', {
+    hints: 0,
+    family: 4,
+    all: false
+  });
+  assert.deepStrictEqual(res, { address: '127.0.0.1', family: 4 });
+})();
 
 dns.lookup(false, {
   hints: 0,
@@ -93,8 +154,8 @@ dns.lookup('example.com', common.mustCall((error, result, addressType) => {
   assert.strictEqual(tickValue, 1);
   assert.strictEqual(error.code, 'ENOENT');
   const descriptor = Object.getOwnPropertyDescriptor(error, 'message');
-  assert.strictEqual(descriptor.enumerable,
-                     false, 'The error message should be non-enumerable');
+  // The error message should be non-enumerable.
+  assert.strictEqual(descriptor.enumerable, false);
 }));
 
 // Make sure that the error callback is called

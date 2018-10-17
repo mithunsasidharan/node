@@ -7,8 +7,8 @@
 #include "include/v8-platform.h"
 #include "include/v8.h"
 #include "src/base/platform/time.h"
+#include "src/base/template-utils.h"
 #include "src/cancelable-task.h"
-#include "src/compilation-info.h"
 #include "src/compiler-dispatcher/compiler-dispatcher-job.h"
 #include "src/compiler-dispatcher/compiler-dispatcher-tracer.h"
 #include "src/compiler-dispatcher/unoptimized-compile-job.h"
@@ -71,7 +71,7 @@ const double kMaxIdleTimeToExpectInMs = 40;
 
 class MemoryPressureTask : public CancelableTask {
  public:
-  MemoryPressureTask(Isolate* isolate, CancelableTaskManager* task_manager,
+  MemoryPressureTask(CancelableTaskManager* task_manager,
                      CompilerDispatcher* dispatcher);
   ~MemoryPressureTask() override;
 
@@ -84,8 +84,7 @@ class MemoryPressureTask : public CancelableTask {
   DISALLOW_COPY_AND_ASSIGN(MemoryPressureTask);
 };
 
-MemoryPressureTask::MemoryPressureTask(Isolate* isolate,
-                                       CancelableTaskManager* task_manager,
+MemoryPressureTask::MemoryPressureTask(CancelableTaskManager* task_manager,
                                        CompilerDispatcher* dispatcher)
     : CancelableTask(task_manager), dispatcher_(dispatcher) {}
 
@@ -99,7 +98,7 @@ void MemoryPressureTask::RunInternal() {
 
 class CompilerDispatcher::AbortTask : public CancelableTask {
  public:
-  AbortTask(Isolate* isolate, CancelableTaskManager* task_manager,
+  AbortTask(CancelableTaskManager* task_manager,
             CompilerDispatcher* dispatcher);
   ~AbortTask() override;
 
@@ -112,8 +111,7 @@ class CompilerDispatcher::AbortTask : public CancelableTask {
   DISALLOW_COPY_AND_ASSIGN(AbortTask);
 };
 
-CompilerDispatcher::AbortTask::AbortTask(Isolate* isolate,
-                                         CancelableTaskManager* task_manager,
+CompilerDispatcher::AbortTask::AbortTask(CancelableTaskManager* task_manager,
                                          CompilerDispatcher* dispatcher)
     : CancelableTask(task_manager), dispatcher_(dispatcher) {}
 
@@ -123,11 +121,11 @@ void CompilerDispatcher::AbortTask::RunInternal() {
   dispatcher_->AbortInactiveJobs();
 }
 
-class CompilerDispatcher::BackgroundTask : public CancelableTask {
+class CompilerDispatcher::WorkerTask : public CancelableTask {
  public:
-  BackgroundTask(Isolate* isolate, CancelableTaskManager* task_manager,
-                 CompilerDispatcher* dispatcher);
-  ~BackgroundTask() override;
+  WorkerTask(CancelableTaskManager* task_manager,
+             CompilerDispatcher* dispatcher);
+  ~WorkerTask() override;
 
   // CancelableTask implementation.
   void RunInternal() override;
@@ -135,24 +133,22 @@ class CompilerDispatcher::BackgroundTask : public CancelableTask {
  private:
   CompilerDispatcher* dispatcher_;
 
-  DISALLOW_COPY_AND_ASSIGN(BackgroundTask);
+  DISALLOW_COPY_AND_ASSIGN(WorkerTask);
 };
 
-CompilerDispatcher::BackgroundTask::BackgroundTask(
-    Isolate* isolate, CancelableTaskManager* task_manager,
-    CompilerDispatcher* dispatcher)
+CompilerDispatcher::WorkerTask::WorkerTask(CancelableTaskManager* task_manager,
+                                           CompilerDispatcher* dispatcher)
     : CancelableTask(task_manager), dispatcher_(dispatcher) {}
 
-CompilerDispatcher::BackgroundTask::~BackgroundTask() {}
+CompilerDispatcher::WorkerTask::~WorkerTask() {}
 
-void CompilerDispatcher::BackgroundTask::RunInternal() {
+void CompilerDispatcher::WorkerTask::RunInternal() {
   dispatcher_->DoBackgroundWork();
 }
 
 class CompilerDispatcher::IdleTask : public CancelableIdleTask {
  public:
-  IdleTask(Isolate* isolate, CancelableTaskManager* task_manager,
-           CompilerDispatcher* dispatcher);
+  IdleTask(CancelableTaskManager* task_manager, CompilerDispatcher* dispatcher);
   ~IdleTask() override;
 
   // CancelableIdleTask implementation.
@@ -164,8 +160,7 @@ class CompilerDispatcher::IdleTask : public CancelableIdleTask {
   DISALLOW_COPY_AND_ASSIGN(IdleTask);
 };
 
-CompilerDispatcher::IdleTask::IdleTask(Isolate* isolate,
-                                       CancelableTaskManager* task_manager,
+CompilerDispatcher::IdleTask::IdleTask(CancelableTaskManager* task_manager,
                                        CompilerDispatcher* dispatcher)
     : CancelableIdleTask(task_manager), dispatcher_(dispatcher) {}
 
@@ -188,7 +183,7 @@ CompilerDispatcher::CompilerDispatcher(Isolate* isolate, Platform* platform,
       memory_pressure_level_(MemoryPressureLevel::kNone),
       abort_(false),
       idle_task_scheduled_(false),
-      num_background_tasks_(0),
+      num_worker_tasks_(0),
       main_thread_blocking_on_job_(nullptr),
       block_for_testing_(false),
       semaphore_for_testing_(0) {
@@ -434,7 +429,7 @@ void CompilerDispatcher::AbortInactiveJobs() {
   }
   if (jobs_.empty()) {
     base::LockGuard<base::Mutex> lock(&mutex_);
-    if (num_background_tasks_ == 0) abort_ = false;
+    if (num_worker_tasks_ == 0) abort_ = false;
   }
 }
 
@@ -465,7 +460,7 @@ void CompilerDispatcher::MemoryPressureNotification(
     }
     platform_->CallOnForegroundThread(
         reinterpret_cast<v8::Isolate*>(isolate_),
-        new MemoryPressureTask(isolate_, task_manager_.get(), this));
+        new MemoryPressureTask(task_manager_.get(), this));
   }
 }
 
@@ -490,7 +485,7 @@ void CompilerDispatcher::ScheduleIdleTaskFromAnyThread() {
     idle_task_scheduled_ = true;
   }
   platform_->CallIdleOnForegroundThread(
-      v8_isolate, new IdleTask(isolate_, task_manager_.get(), this));
+      v8_isolate, new IdleTask(task_manager_.get(), this));
 }
 
 void CompilerDispatcher::ScheduleIdleTaskIfNeeded() {
@@ -500,8 +495,8 @@ void CompilerDispatcher::ScheduleIdleTaskIfNeeded() {
 
 void CompilerDispatcher::ScheduleAbortTask() {
   v8::Isolate* v8_isolate = reinterpret_cast<v8::Isolate*>(isolate_);
-  platform_->CallOnForegroundThread(
-      v8_isolate, new AbortTask(isolate_, task_manager_.get(), this));
+  platform_->CallOnForegroundThread(v8_isolate,
+                                    new AbortTask(task_manager_.get(), this));
 }
 
 void CompilerDispatcher::ConsiderJobForBackgroundProcessing(
@@ -511,24 +506,22 @@ void CompilerDispatcher::ConsiderJobForBackgroundProcessing(
     base::LockGuard<base::Mutex> lock(&mutex_);
     pending_background_jobs_.insert(job);
   }
-  ScheduleMoreBackgroundTasksIfNeeded();
+  ScheduleMoreWorkerTasksIfNeeded();
 }
 
-void CompilerDispatcher::ScheduleMoreBackgroundTasksIfNeeded() {
+void CompilerDispatcher::ScheduleMoreWorkerTasksIfNeeded() {
   TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("v8.compile"),
-               "V8.CompilerDispatcherScheduleMoreBackgroundTasksIfNeeded");
+               "V8.CompilerDispatcherScheduleMoreWorkerTasksIfNeeded");
   {
     base::LockGuard<base::Mutex> lock(&mutex_);
     if (pending_background_jobs_.empty()) return;
-    if (platform_->NumberOfAvailableBackgroundThreads() <=
-        num_background_tasks_) {
+    if (platform_->NumberOfWorkerThreads() <= num_worker_tasks_) {
       return;
     }
-    ++num_background_tasks_;
+    ++num_worker_tasks_;
   }
-  platform_->CallOnBackgroundThread(
-      new BackgroundTask(isolate_, task_manager_.get(), this),
-      v8::Platform::kShortRunningTask);
+  platform_->CallOnWorkerThread(
+      base::make_unique<WorkerTask>(task_manager_.get(), this));
 }
 
 void CompilerDispatcher::DoBackgroundWork() {
@@ -572,7 +565,7 @@ void CompilerDispatcher::DoBackgroundWork() {
 
   {
     base::LockGuard<base::Mutex> lock(&mutex_);
-    --num_background_tasks_;
+    --num_worker_tasks_;
 
     if (running_background_jobs_.empty() && abort_) {
       // This is the last background job that finished. The abort task
@@ -711,8 +704,8 @@ CompilerDispatcher::JobMap::const_iterator CompilerDispatcher::RemoveJob(
     Handle<SharedFunctionInfo> shared =
         job->AsUnoptimizedCompileJob()->shared();
     if (!shared.is_null()) {
-      JobId deleted_id = shared_to_unoptimized_job_id_.Delete(shared);
-      USE(deleted_id);
+      JobId deleted_id;
+      shared_to_unoptimized_job_id_.Delete(shared, &deleted_id);
       DCHECK_EQ(it->first, deleted_id);
     }
   }
@@ -720,7 +713,7 @@ CompilerDispatcher::JobMap::const_iterator CompilerDispatcher::RemoveJob(
   it = jobs_.erase(it);
   if (jobs_.empty()) {
     base::LockGuard<base::Mutex> lock(&mutex_);
-    if (num_background_tasks_ == 0) abort_ = false;
+    if (num_worker_tasks_ == 0) abort_ = false;
   }
   return it;
 }

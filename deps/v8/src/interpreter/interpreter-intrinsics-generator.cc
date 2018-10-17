@@ -7,12 +7,13 @@
 #include "src/allocation.h"
 #include "src/builtins/builtins.h"
 #include "src/code-factory.h"
-#include "src/factory-inl.h"
 #include "src/frames.h"
+#include "src/heap/factory-inl.h"
 #include "src/interpreter/bytecodes.h"
 #include "src/interpreter/interpreter-assembler.h"
 #include "src/interpreter/interpreter-intrinsics.h"
 #include "src/objects-inl.h"
+#include "src/objects/js-generator.h"
 #include "src/objects/module.h"
 
 namespace v8 {
@@ -20,6 +21,8 @@ namespace internal {
 namespace interpreter {
 
 using compiler::Node;
+template <typename T>
+using TNode = compiler::TNode<T>;
 
 class IntrinsicsGenerator {
  public:
@@ -132,23 +135,21 @@ Node* IntrinsicsGenerator::CompareInstanceType(Node* object, int type,
 }
 
 Node* IntrinsicsGenerator::IsInstanceType(Node* input, int type) {
-  Node* result =
-      __ Select(__ TaggedIsSmi(input), [=] { return __ FalseConstant(); },
-                [=] {
-                  return __ SelectBooleanConstant(
-                      CompareInstanceType(input, type, kInstanceTypeEqual));
-                },
-                MachineRepresentation::kTagged);
+  TNode<Oddball> result = __ Select<Oddball>(
+      __ TaggedIsSmi(input), [=] { return __ FalseConstant(); },
+      [=] {
+        return __ SelectBooleanConstant(
+            CompareInstanceType(input, type, kInstanceTypeEqual));
+      });
   return result;
 }
 
 Node* IntrinsicsGenerator::IsJSReceiver(
     const InterpreterAssembler::RegListNodePair& args, Node* context) {
   Node* input = __ LoadRegisterFromRegisterList(args, 0);
-  Node* result = __ Select(
+  TNode<Oddball> result = __ Select<Oddball>(
       __ TaggedIsSmi(input), [=] { return __ FalseConstant(); },
-      [=] { return __ SelectBooleanConstant(__ IsJSReceiver(input)); },
-      MachineRepresentation::kTagged);
+      [=] { return __ SelectBooleanConstant(__ IsJSReceiver(input)); });
   return result;
 }
 
@@ -168,30 +169,6 @@ Node* IntrinsicsGenerator::IsTypedArray(
     const InterpreterAssembler::RegListNodePair& args, Node* context) {
   Node* input = __ LoadRegisterFromRegisterList(args, 0);
   return IsInstanceType(input, JS_TYPED_ARRAY_TYPE);
-}
-
-Node* IntrinsicsGenerator::IsJSMap(
-    const InterpreterAssembler::RegListNodePair& args, Node* context) {
-  Node* input = __ LoadRegisterFromRegisterList(args, 0);
-  return IsInstanceType(input, JS_MAP_TYPE);
-}
-
-Node* IntrinsicsGenerator::IsJSSet(
-    const InterpreterAssembler::RegListNodePair& args, Node* context) {
-  Node* input = __ LoadRegisterFromRegisterList(args, 0);
-  return IsInstanceType(input, JS_SET_TYPE);
-}
-
-Node* IntrinsicsGenerator::IsJSWeakMap(
-    const InterpreterAssembler::RegListNodePair& args, Node* context) {
-  Node* input = __ LoadRegisterFromRegisterList(args, 0);
-  return IsInstanceType(input, JS_WEAK_MAP_TYPE);
-}
-
-Node* IntrinsicsGenerator::IsJSWeakSet(
-    const InterpreterAssembler::RegListNodePair& args, Node* context) {
-  Node* input = __ LoadRegisterFromRegisterList(args, 0);
-  return IsInstanceType(input, JS_WEAK_SET_TYPE);
 }
 
 Node* IntrinsicsGenerator::IsSmi(
@@ -233,6 +210,12 @@ Node* IntrinsicsGenerator::HasProperty(
     const InterpreterAssembler::RegListNodePair& args, Node* context) {
   return IntrinsicAsStubCall(
       args, context, Builtins::CallableFor(isolate(), Builtins::kHasProperty));
+}
+
+Node* IntrinsicsGenerator::GetProperty(
+    const InterpreterAssembler::RegListNodePair& args, Node* context) {
+  return IntrinsicAsStubCall(
+      args, context, Builtins::CallableFor(isolate(), Builtins::kGetProperty));
 }
 
 Node* IntrinsicsGenerator::RejectPromise(
@@ -400,30 +383,6 @@ Node* IntrinsicsGenerator::GetImportMetaObject(
 
   __ BIND(&end);
   return return_value.value();
-}
-
-Node* IntrinsicsGenerator::AsyncFunctionAwaitCaught(
-    const InterpreterAssembler::RegListNodePair& args, Node* context) {
-  return IntrinsicAsBuiltinCall(args, context,
-                                Builtins::kAsyncFunctionAwaitCaught);
-}
-
-Node* IntrinsicsGenerator::AsyncFunctionAwaitUncaught(
-    const InterpreterAssembler::RegListNodePair& args, Node* context) {
-  return IntrinsicAsBuiltinCall(args, context,
-                                Builtins::kAsyncFunctionAwaitUncaught);
-}
-
-Node* IntrinsicsGenerator::AsyncGeneratorAwaitCaught(
-    const InterpreterAssembler::RegListNodePair& args, Node* context) {
-  return IntrinsicAsBuiltinCall(args, context,
-                                Builtins::kAsyncGeneratorAwaitCaught);
-}
-
-Node* IntrinsicsGenerator::AsyncGeneratorAwaitUncaught(
-    const InterpreterAssembler::RegListNodePair& args, Node* context) {
-  return IntrinsicAsBuiltinCall(args, context,
-                                Builtins::kAsyncGeneratorAwaitUncaught);
 }
 
 Node* IntrinsicsGenerator::AsyncGeneratorReject(

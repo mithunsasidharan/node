@@ -76,7 +76,10 @@ class TLSWrap : public AsyncWrap,
 
   void NewSessionDoneCb();
 
-  size_t self_size() const override { return sizeof(*this); }
+  void MemoryInfo(MemoryTracker* tracker) const override;
+
+  SET_MEMORY_INFO_NAME(TLSWrap)
+  SET_SELF_SIZE(TLSWrap)
 
  protected:
   inline StreamBase* underlying_stream() {
@@ -138,30 +141,27 @@ class TLSWrap : public AsyncWrap,
   static void EnableCertCb(
       const v8::FunctionCallbackInfo<v8::Value>& args);
   static void DestroySSL(const v8::FunctionCallbackInfo<v8::Value>& args);
-
-#ifdef SSL_CTRL_SET_TLSEXT_SERVERNAME_CB
   static void GetServername(const v8::FunctionCallbackInfo<v8::Value>& args);
   static void SetServername(const v8::FunctionCallbackInfo<v8::Value>& args);
   static int SelectSNIContextCallback(SSL* s, int* ad, void* arg);
-#endif  // SSL_CTRL_SET_TLSEXT_SERVERNAME_CB
 
   crypto::SecureContext* sc_;
-  BIO* enc_in_;
-  BIO* enc_out_;
+  BIO* enc_in_ = nullptr;
+  BIO* enc_out_ = nullptr;
   std::vector<uv_buf_t> pending_cleartext_input_;
-  size_t write_size_;
+  size_t write_size_ = 0;
   WriteWrap* current_write_ = nullptr;
   WriteWrap* current_empty_write_ = nullptr;
   bool write_callback_scheduled_ = false;
-  bool started_;
-  bool established_;
-  bool shutdown_;
+  bool started_ = false;
+  bool established_ = false;
+  bool shutdown_ = false;
   std::string error_;
-  int cycle_depth_;
+  int cycle_depth_ = 0;
 
   // If true - delivered EOF to the js-land, either after `close_notify`, or
   // after the `UV_EOF` on socket.
-  bool eof_;
+  bool eof_ = false;
 
  private:
   static void GetWriteQueueSize(

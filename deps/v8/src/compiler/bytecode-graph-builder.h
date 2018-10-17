@@ -31,11 +31,11 @@ class BytecodeGraphBuilder {
   BytecodeGraphBuilder(
       Zone* local_zone, Handle<SharedFunctionInfo> shared,
       Handle<FeedbackVector> feedback_vector, BailoutId osr_offset,
-      JSGraph* jsgraph, CallFrequency invocation_frequency,
+      JSGraph* jsgraph, CallFrequency& invocation_frequency,
       SourcePositionTable* source_positions, Handle<Context> native_context,
       int inlining_id = SourcePosition::kNotInlined,
       JSTypeHintLowering::Flags flags = JSTypeHintLowering::kNoFlags,
-      bool stack_check = true);
+      bool stack_check = true, bool analyze_environment_liveness = true);
 
   // Creates a graph by visiting bytecodes.
   void CreateGraph();
@@ -90,6 +90,12 @@ class BytecodeGraphBuilder {
 
   Node* NewNode(const Operator* op, Node* n1, Node* n2, Node* n3, Node* n4) {
     Node* buffer[] = {n1, n2, n3, n4};
+    return MakeNode(op, arraysize(buffer), buffer, false);
+  }
+
+  Node* NewNode(const Operator* op, Node* n1, Node* n2, Node* n3, Node* n4,
+                Node* n5, Node* n6) {
+    Node* buffer[] = {n1, n2, n3, n4, n5, n6};
     return MakeNode(op, arraysize(buffer), buffer, false);
   }
 
@@ -178,7 +184,6 @@ class BytecodeGraphBuilder {
   void BuildBinaryOp(const Operator* op);
   void BuildBinaryOpWithImmediate(const Operator* op);
   void BuildCompareOp(const Operator* op);
-  void BuildTestingOp(const Operator* op);
   void BuildDelete(LanguageMode language_mode);
   void BuildCastOperator(const Operator* op);
   void BuildHoleCheckAndThrow(Node* condition, Runtime::FunctionId runtime_id,
@@ -302,6 +307,7 @@ class BytecodeGraphBuilder {
   CommonOperatorBuilder* common() const { return jsgraph_->common(); }
   Zone* graph_zone() const { return graph()->zone(); }
   JSGraph* jsgraph() const { return jsgraph_; }
+  Isolate* isolate() const { return jsgraph_->isolate(); }
   JSOperatorBuilder* javascript() const { return jsgraph_->javascript(); }
   SimplifiedOperatorBuilder* simplified() const {
     return jsgraph_->simplified();
@@ -349,6 +355,10 @@ class BytecodeGraphBuilder {
 
   void set_stack_check(bool stack_check) { stack_check_ = stack_check; }
 
+  bool analyze_environment_liveness() const {
+    return analyze_environment_liveness_;
+  }
+
   int current_exception_handler() { return current_exception_handler_; }
 
   void set_current_exception_handler(int index) {
@@ -379,6 +389,7 @@ class BytecodeGraphBuilder {
   BailoutId osr_offset_;
   int currently_peeled_loop_offset_;
   bool stack_check_;
+  bool analyze_environment_liveness_;
 
   // Merge environments are snapshots of the environment at points where the
   // control flow merges. This models a forward data flow propagation of all

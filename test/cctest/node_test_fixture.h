@@ -53,25 +53,25 @@ struct Argv {
   int nr_args_;
 };
 
+using ArrayBufferUniquePtr = std::unique_ptr<node::ArrayBufferAllocator,
+      decltype(&node::FreeArrayBufferAllocator)>;
+using TracingAgentUniquePtr = std::unique_ptr<node::tracing::Agent>;
+using NodePlatformUniquePtr = std::unique_ptr<node::NodePlatform>;
 
 class NodeTestFixture : public ::testing::Test {
  protected:
-  static std::unique_ptr<v8::ArrayBuffer::Allocator> allocator;
-  static std::unique_ptr<v8::TracingController> tracing_controller;
-  static std::unique_ptr<node::NodePlatform> platform;
-  static v8::Isolate::CreateParams params;
+  static ArrayBufferUniquePtr allocator;
+  static TracingAgentUniquePtr tracing_agent;
+  static NodePlatformUniquePtr platform;
   static uv_loop_t current_loop;
   v8::Isolate* isolate_;
 
   static void SetUpTestCase() {
-    platform.reset(new node::NodePlatform(4, nullptr));
-    tracing_controller.reset(new v8::TracingController());
-    allocator.reset(v8::ArrayBuffer::Allocator::NewDefaultAllocator());
-    params.array_buffer_allocator = allocator.get();
-    node::tracing::TraceEventHelper::SetTracingController(
-        tracing_controller.get());
+    tracing_agent.reset(new node::tracing::Agent());
+    node::tracing::TraceEventHelper::SetAgent(tracing_agent.get());
     CHECK_EQ(0, uv_loop_init(&current_loop));
-    v8::V8::InitializePlatform(platform.get());
+    platform.reset(static_cast<node::NodePlatform*>(
+          node::InitializeV8Platform(4)));
     v8::V8::Initialize();
   }
 
@@ -85,12 +85,15 @@ class NodeTestFixture : public ::testing::Test {
   }
 
   virtual void SetUp() {
-    isolate_ = v8::Isolate::New(params);
+    allocator = ArrayBufferUniquePtr(node::CreateArrayBufferAllocator(),
+                                     &node::FreeArrayBufferAllocator);
+    isolate_ = NewIsolate(allocator.get(), &current_loop);
     CHECK_NE(isolate_, nullptr);
   }
 
   virtual void TearDown() {
     isolate_->Dispose();
+    platform->UnregisterIsolate(isolate_);
     isolate_ = nullptr;
   }
 };

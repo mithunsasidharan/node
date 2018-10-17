@@ -21,18 +21,56 @@ using v8::Value;
 
 namespace fs {
 
+// structure used to store state during a complex operation, e.g., mkdirp.
+class FSContinuationData : public MemoryRetainer {
+ public:
+  FSContinuationData(uv_fs_t* req, int mode, uv_fs_cb done_cb)
+      : req(req), mode(mode), done_cb(done_cb) {
+  }
+
+  uv_fs_t* req;
+  int mode;
+  std::vector<std::string> paths;
+
+  void PushPath(std::string&& path) {
+    paths.emplace_back(std::move(path));
+  }
+
+  void PushPath(const std::string& path) {
+    paths.push_back(path);
+  }
+
+  std::string PopPath() {
+    CHECK_GT(paths.size(), 0);
+    std::string path = std::move(paths.back());
+    paths.pop_back();
+    return path;
+  }
+
+  void Done(int result) {
+    req->result = result;
+    done_cb(req);
+  }
+
+  void MemoryInfo(MemoryTracker* tracker) const override {
+    tracker->TrackField("paths", paths);
+  }
+
+  SET_MEMORY_INFO_NAME(FSContinuationData)
+  SET_SELF_SIZE(FSContinuationData)
+
+ private:
+  uv_fs_cb done_cb;
+};
 
 class FSReqBase : public ReqWrap<uv_fs_t> {
  public:
   typedef MaybeStackBuffer<char, 64> FSReqBuffer;
+  std::unique_ptr<FSContinuationData> continuation_data = nullptr;
 
-  FSReqBase(Environment* env, Local<Object> req, AsyncWrap::ProviderType type)
-      : ReqWrap(env, req, type) {
-    Wrap(object(), this);
-  }
-
-  virtual ~FSReqBase() {
-    ClearWrap(object());
+  FSReqBase(Environment* env, Local<Object> req, AsyncWrap::ProviderType type,
+            bool use_bigint)
+      : ReqWrap(env, req, type), use_bigint_(use_bigint) {
   }
 
   void Init(const char* syscall,
@@ -70,12 +108,17 @@ class FSReqBase : public ReqWrap<uv_fs_t> {
   const char* data() const { return has_data_ ? *buffer_ : nullptr; }
   enum encoding encoding() const { return encoding_; }
 
-  size_t self_size() const override { return sizeof(*this); }
+  bool use_bigint() const { return use_bigint_; }
+
+  static FSReqBase* from_req(uv_fs_t* req) {
+    return static_cast<FSReqBase*>(ReqWrap::from_req(req));
+  }
 
  private:
   enum encoding encoding_ = UTF8;
   bool has_data_ = false;
   const char* syscall_ = nullptr;
+  bool use_bigint_ = false;
 
   // Typically, the content of buffer_ is something like a file name, so
   // something around 64 bytes should be enough.
@@ -84,28 +127,36 @@ class FSReqBase : public ReqWrap<uv_fs_t> {
   DISALLOW_COPY_AND_ASSIGN(FSReqBase);
 };
 
-class FSReqWrap : public FSReqBase {
+class FSReqCallback : public FSReqBase {
  public:
-  FSReqWrap(Environment* env, Local<Object> req)
-      : FSReqBase(env, req, AsyncWrap::PROVIDER_FSREQWRAP) { }
+  FSReqCallback(Environment* env, Local<Object> req, bool use_bigint)
+      : FSReqBase(env, req, AsyncWrap::PROVIDER_FSREQCALLBACK, use_bigint) { }
 
   void Reject(Local<Value> reject) override;
   void Resolve(Local<Value> value) override;
   void ResolveStat(const uv_stat_t* stat) override;
   void SetReturnValue(const FunctionCallbackInfo<Value>& args) override;
 
+  void MemoryInfo(MemoryTracker* tracker) const override {
+    tracker->TrackField("continuation_data", continuation_data);
+  }
+
+  SET_MEMORY_INFO_NAME(FSReqCallback)
+  SET_SELF_SIZE(FSReqCallback)
+
  private:
-  DISALLOW_COPY_AND_ASSIGN(FSReqWrap);
+  DISALLOW_COPY_AND_ASSIGN(FSReqCallback);
 };
 
 template <typename NativeT = double, typename V8T = v8::Float64Array>
 class FSReqPromise : public FSReqBase {
  public:
-  explicit FSReqPromise(Environment* env)
+  explicit FSReqPromise(Environment* env, bool use_bigint)
       : FSReqBase(env,
                   env->fsreqpromise_constructor_template()
                       ->NewInstance(env->context()).ToLocalChecked(),
-                  AsyncWrap::PROVIDER_FSREQPROMISE),
+                  AsyncWrap::PROVIDER_FSREQPROMISE,
+                  use_bigint),
         stats_field_array_(env->isolate(), env->kFsStatsFieldsLength) {
     auto resolver = Promise::Resolver::New(env->context()).ToLocalChecked();
     object()->Set(env->context(), env->promise_string(),
@@ -140,8 +191,7 @@ class FSReqPromise : public FSReqBase {
   }
 
   void ResolveStat(const uv_stat_t* stat) override {
-    node::FillStatsArray(&stats_field_array_, stat);
-    Resolve(stats_field_array_.GetJSArray());
+    Resolve(node::FillStatsArray(&stats_field_array_, stat));
   }
 
   void SetReturnValue(const FunctionCallbackInfo<Value>& args) override {
@@ -151,6 +201,14 @@ class FSReqPromise : public FSReqBase {
     Local<Promise::Resolver> resolver = val.As<Promise::Resolver>();
     args.GetReturnValue().Set(resolver->GetPromise());
   }
+
+  void MemoryInfo(MemoryTracker* tracker) const override {
+    tracker->TrackField("stats_field_array", stats_field_array_);
+    tracker->TrackField("continuation_data", continuation_data);
+  }
+
+  SET_MEMORY_INFO_NAME(FSReqPromise)
+  SET_SELF_SIZE(FSReqPromise)
 
  private:
   bool finished_ = false;
@@ -186,7 +244,9 @@ class FileHandleReadWrap : public ReqWrap<uv_fs_t> {
     return static_cast<FileHandleReadWrap*>(ReqWrap::from_req(req));
   }
 
-  size_t self_size() const override { return sizeof(*this); }
+  void MemoryInfo(MemoryTracker* tracker) const override;
+  SET_MEMORY_INFO_NAME(FileHandleReadWrap)
+  SET_SELF_SIZE(FileHandleReadWrap)
 
  private:
   FileHandle* file_handle_;
@@ -207,7 +267,6 @@ class FileHandle : public AsyncWrap, public StreamBase {
   static void New(const v8::FunctionCallbackInfo<v8::Value>& args);
 
   int fd() const { return fd_; }
-  size_t self_size() const override { return sizeof(*this); }
 
   // Will asynchronously close the FD and return a Promise that will
   // be resolved once closing is complete.
@@ -235,6 +294,13 @@ class FileHandle : public AsyncWrap, public StreamBase {
     return UV_ENOSYS;  // Not implemented (yet).
   }
 
+  void MemoryInfo(MemoryTracker* tracker) const override {
+    tracker->TrackField("current_read", current_read_);
+  }
+
+  SET_MEMORY_INFO_NAME(FileHandle)
+  SET_SELF_SIZE(FileHandle)
+
  private:
   // Synchronous close that emits a warning
   void Close();
@@ -249,10 +315,10 @@ class FileHandle : public AsyncWrap, public StreamBase {
                   env->fdclose_constructor_template()
                       ->NewInstance(env->context()).ToLocalChecked(),
                   AsyncWrap::PROVIDER_FILEHANDLECLOSEREQ) {
-      Wrap(object(), this);
       promise_.Reset(env->isolate(), promise);
       ref_.Reset(env->isolate(), ref);
     }
+
     ~CloseReq() {
       uv_fs_req_cleanup(req());
       promise_.Reset();
@@ -261,11 +327,21 @@ class FileHandle : public AsyncWrap, public StreamBase {
 
     FileHandle* file_handle();
 
-    size_t self_size() const override { return sizeof(*this); }
+    void MemoryInfo(MemoryTracker* tracker) const override {
+      tracker->TrackField("promise", promise_);
+      tracker->TrackField("ref", ref_);
+    }
+
+    SET_MEMORY_INFO_NAME(CloseReq)
+    SET_SELF_SIZE(CloseReq)
 
     void Resolve();
 
     void Reject(Local<Value> reason);
+
+    static CloseReq* from_req(uv_fs_t* req) {
+      return static_cast<CloseReq*>(ReqWrap::from_req(req));
+    }
 
    private:
     Persistent<Promise> promise_;

@@ -5,6 +5,8 @@ const fixtures = require('../common/fixtures');
 // Refs: https://github.com/nodejs/node/pull/2253
 if (common.isSunOS)
   common.skip('unreliable on SunOS');
+if (!common.isMainThread)
+  common.skip('process.chdir is not available in Workers');
 
 const assert = require('assert');
 const childProcess = require('child_process');
@@ -129,6 +131,26 @@ childProcess.exec(
     assert.ok(/worker terminated with code 43/.test(stdout));
   }
 );
+
+// test that preloading with a relative path works
+process.chdir(fixtures.fixturesDir);
+childProcess.exec(
+  `"${nodeBinary}" ${preloadOption(['./printA.js'])} "${fixtureB}"`,
+  common.mustCall(function(err, stdout, stderr) {
+    assert.ifError(err);
+    assert.strictEqual(stdout, 'A\nB\n');
+  })
+);
+if (common.isWindows) {
+  // https://github.com/nodejs/node/issues/21918
+  childProcess.exec(
+    `"${nodeBinary}" ${preloadOption(['.\\printA.js'])} "${fixtureB}"`,
+    common.mustCall(function(err, stdout, stderr) {
+      assert.ifError(err);
+      assert.strictEqual(stdout, 'A\nB\n');
+    })
+  );
+}
 
 // https://github.com/nodejs/node/issues/1691
 process.chdir(fixtures.fixturesDir);

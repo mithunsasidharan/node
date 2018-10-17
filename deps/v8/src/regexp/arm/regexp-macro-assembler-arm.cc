@@ -8,7 +8,7 @@
 
 #include "src/assembler-inl.h"
 #include "src/code-stubs.h"
-#include "src/factory.h"
+#include "src/heap/factory.h"
 #include "src/log.h"
 #include "src/macro-assembler.h"
 #include "src/objects-inl.h"
@@ -575,7 +575,7 @@ bool RegExpMacroAssemblerARM::CheckSpecialCharacterClass(uc16 type,
       __ cmp(current_character(), Operand('z'));
       BranchOrBacktrack(hi, on_no_match);
     }
-    ExternalReference map = ExternalReference::re_word_character_map();
+    ExternalReference map = ExternalReference::re_word_character_map(isolate());
     __ mov(r0, Operand(map));
     __ ldrb(r0, MemOperand(r0, current_character()));
     __ cmp(r0, Operand::Zero());
@@ -589,7 +589,7 @@ bool RegExpMacroAssemblerARM::CheckSpecialCharacterClass(uc16 type,
       __ cmp(current_character(), Operand('z'));
       __ b(hi, &done);
     }
-    ExternalReference map = ExternalReference::re_word_character_map();
+    ExternalReference map = ExternalReference::re_word_character_map(isolate());
     __ mov(r0, Operand(map));
     __ ldrb(r0, MemOperand(r0, current_character()));
     __ cmp(r0, Operand::Zero());
@@ -1080,7 +1080,7 @@ void RegExpMacroAssemblerARM::CallCheckStackGuardState() {
 // Helper function for reading a value out of a stack frame.
 template <typename T>
 static T& frame_entry(Address re_frame, int frame_offset) {
-  return reinterpret_cast<T&>(Memory::int32_at(re_frame + frame_offset));
+  return reinterpret_cast<T&>(Memory<int32_t>(re_frame + frame_offset));
 }
 
 

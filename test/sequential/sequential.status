@@ -5,12 +5,12 @@ prefix sequential
 # sample-test                       : PASS,FLAKY
 
 [true] # This section applies to all platforms
+# https://github.com/nodejs/node/issues/22336
+test-gc-http-client: PASS,FLAKY
 
 [$system==win32]
-test-inspector-async-call-stack       : PASS, FLAKY
-test-inspector-bindings               : PASS, FLAKY
-test-inspector-debug-end              : PASS, FLAKY
-test-inspector-async-hook-setup-at-signal:  PASS, FLAKY
+# https://github.com/nodejs/node/issues/22327
+test-http2-large-file: PASS, FLAKY
 
 [$system==linux]
 
@@ -21,3 +21,7 @@ test-inspector-async-hook-setup-at-signal:  PASS, FLAKY
 [$system==freebsd]
 
 [$system==aix]
+
+[$arch==arm]
+# https://github.com/nodejs/node/issues/20628
+test-http2-session-timeout: PASS,FLAKY
